@@ -1,0 +1,28 @@
+{
+  "jobs": [
+    {
+      "name": "build",
+      "schedule": "@every 1m",
+      "steps": [
+        { "name": "compile", "handler": "log", "args": ["build: compiling sources"] },
+        { "name": "package", "command": "echo packaged artifact" }
+      ]
+    },
+    {
+      "name": "test",
+      "schedule": "@every 1m",
+      "steps": [
+        { "name": "unit", "handler": "log", "args": ["test: running unit tests"] },
+        { "name": "lint", "handler": "noop" }
+      ]
+    },
+    {
+      "name": "deploy",
+      "dependsOn": ["build", "test"],
+      "steps": [
+        { "name": "ship", "handler": "log", "args": ["deploy: shipping (runs only after build AND test succeed)"] },
+        { "name": "smoke", "handler": "noop", "retries": 2, "retryDelay": "1s" }
+      ]
+    }
+  ]
+}

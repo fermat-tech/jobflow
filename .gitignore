@@ -1,0 +1,6 @@
+# Build artifacts
+*.exe
+
+# Runtime state
+jobflow-state.json
+scratch/

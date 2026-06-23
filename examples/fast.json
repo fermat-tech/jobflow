@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "name": "build",
+      "schedule": "@every 2s",
+      "steps": [
+        { "name": "compile", "handler": "log", "args": ["build: compiling"] }
+      ]
+    },
+    {
+      "name": "test",
+      "schedule": "@every 2s",
+      "steps": [
+        { "name": "unit", "handler": "noop" }
+      ]
+    },
+    {
+      "name": "deploy",
+      "dependsOn": ["build", "test"],
+      "steps": [
+        { "name": "ship", "handler": "log", "args": ["deploy: shipping after build+test"] }
+      ]
+    }
+  ]
+}
