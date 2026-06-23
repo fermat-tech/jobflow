@@ -45,34 +45,45 @@ dependencies and cycles are rejected.
 > Cascade is a scheduler (`serve`) behavior. The one-shot `trigger` command
 > runs a single job and does not cascade to dependents.
 
-### Steps: sequential or parallel
+### Steps: sequential and parallel (stages)
 
-Steps form a DAG *within* a job, mirroring the job-level dependency model:
-
-- If **no** step declares `dependsOn`, the job runs **sequentially** in
-  declaration order (the default — existing configs are unchanged).
-- If **any** step declares `dependsOn`, the job runs as a DAG: steps with no
-  declared deps start immediately and in parallel, and each step waits only for
-  the steps it lists. Independent branches run concurrently; a step listing
-  several deps acts as a join point.
+A job's `steps` is an ordered list of **stages**. A stage is either a single
+step or a **parallel group**. Stages run in order; steps inside a group run
+concurrently, and the next stage waits for all of them. Sequential is the
+default — you only reach for a group where you actually want fan-out, with no
+per-step wiring:
 
 ```json
-{ "name": "checkout" },
-{ "name": "build-linux",   "dependsOn": ["checkout"] },
-{ "name": "build-windows", "dependsOn": ["checkout"] },
-{ "name": "release",       "dependsOn": ["build-linux", "build-windows"] }
+"steps": [
+  { "name": "checkout", "command": "git pull" },
+  { "parallel": [
+      { "name": "build-linux",   "command": "make linux" },
+      { "name": "build-windows", "command": "make windows" },
+      { "name": "build-mac",     "command": "make mac" }
+  ]},
+  { "name": "release", "command": "make release" }
+]
 ```
 
-Here the two builds run in parallel after `checkout`, and `release` runs once
-both finish (see `examples/parallel.json`). If a step fails (and is not
+The three builds run in parallel after `checkout`; `release` runs once all of
+them finish (see `examples/parallel.json`). If a step fails (and is not
 `continueOnError`), steps depending on it are **skipped** ("a dependency did not
-succeed") and the job fails. Step-dependency cycles and references to unknown
-steps are rejected when the job is added.
+succeed") and the job fails.
 
-**Restart over a DAG:** `restart <job> <step>` re-runs that step *and every step
-that transitively depends on it*; all other steps are presumed done and recorded
-as skipped. E.g. `restart pipeline build-windows` re-runs `build-windows` and
-`release`, leaving `checkout` and the other builds untouched.
+**Advanced — arbitrary DAGs:** for asymmetric dependencies that stages can't
+express (e.g. a step that depends on only *one* member of a prior group), a step
+may set `dependsOn` naming other steps in the same job directly. Stage groups
+are simply lowered onto this same mechanism, so the two styles compose; a group
+member's explicit `dependsOn` is unioned with its stage dependency.
+
+Step-dependency cycles and references to unknown steps are rejected when the job
+is added.
+
+**Restart over the graph:** `restart <job> <step>` re-runs that step *and every
+step that transitively depends on it*; all other steps are presumed done and
+recorded as skipped. E.g. `restart pipeline build-windows` re-runs
+`build-windows` and `release`, leaving `checkout` and the other builds
+untouched.
 
 ## CLI
 

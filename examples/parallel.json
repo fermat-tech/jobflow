@@ -5,12 +5,13 @@
       "steps": [
         { "name": "checkout", "handler": "log", "args": ["checkout: fetching source"] },
 
-        { "name": "build-linux",   "handler": "sleep", "args": ["1s"], "dependsOn": ["checkout"] },
-        { "name": "build-windows", "handler": "sleep", "args": ["1s"], "dependsOn": ["checkout"] },
-        { "name": "build-mac",     "handler": "sleep", "args": ["1s"], "dependsOn": ["checkout"] },
+        { "parallel": [
+            { "name": "build-linux",   "handler": "sleep", "args": ["1s"] },
+            { "name": "build-windows", "handler": "sleep", "args": ["1s"] },
+            { "name": "build-mac",     "handler": "sleep", "args": ["1s"] }
+        ]},
 
-        { "name": "release", "handler": "log", "args": ["release: all platform builds done"],
-          "dependsOn": ["build-linux", "build-windows", "build-mac"] }
+        { "name": "release", "handler": "log", "args": ["release: all platform builds done"] }
       ]
     }
   ]
