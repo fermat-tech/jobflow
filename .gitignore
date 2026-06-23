@@ -4,3 +4,6 @@
 # Runtime state
 jobflow-state.json
 scratch/
+
+# Release artifacts
+dist/
