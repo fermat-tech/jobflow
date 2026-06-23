@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fermat-tech/jobflow/internal/cron"
+	"github.com/fermat-tech/jobflow/cron"
 )
 
 // Options configures a new Engine. The zero value is valid; sensible defaults

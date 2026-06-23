@@ -3,12 +3,12 @@
 //
 // Supported field syntax (minute hour day-of-month month day-of-week):
 //
-//	*            any value
-//	5            a single value
-//	1-5          an inclusive range
-//	1,3,5        a list of values/ranges
-//	*/15         a step over the whole range
-//	1-30/5       a step over a range
+//   - any value
+//     5            a single value
+//     1-5          an inclusive range
+//     1,3,5        a list of values/ranges
+//     */15         a step over the whole range
+//     1-30/5       a step over a range
 //
 // Day-of-week accepts 0-6 (Sunday=0) or 7 for Sunday as well. Month and
 // day-of-week also accept three-letter names (jan, mon, ...).

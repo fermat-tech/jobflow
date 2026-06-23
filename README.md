@@ -193,11 +193,15 @@ scheduler resumes with full knowledge of past outcomes.
 
 ## Package layout
 
+The CLI is a thin consumer of three public, importable packages:
+
 ```
-main.go                  CLI: serve/list/status/trigger/restart/validate/handlers
-handlers.go              built-in Go step handlers
-internal/cron/           dependency-free cron parser + Next()
-internal/engine/         Engine, jobs/steps/runs, registry, store, DAG validation
-internal/config/         JSON config -> engine jobs
-examples/                sample configs
+main.go      CLI: serve/list/status/trigger/restart/validate/handlers
+handlers.go  built-in Go step handlers (CLI only)
+engine/      Engine, jobs/steps/runs, registry, store, DAG validation
+cron/        dependency-free cron parser + Next()
+config/      JSON config -> engine jobs
+examples/    sample configs
 ```
+
+Import paths: `github.com/fermat-tech/jobflow/{engine,cron,config}`.

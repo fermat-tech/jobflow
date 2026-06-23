@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/fermat-tech/jobflow/internal/cron"
+	"github.com/fermat-tech/jobflow/cron"
 )
 
 // Status is the lifecycle state of a run or a single step.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fermat-tech/jobflow/internal/engine"
+	"github.com/fermat-tech/jobflow/engine"
 )
 
 // registerHandlers installs the built-in Go step handlers. Library users can

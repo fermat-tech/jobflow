@@ -31,8 +31,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/fermat-tech/jobflow/internal/config"
-	"github.com/fermat-tech/jobflow/internal/engine"
+	"github.com/fermat-tech/jobflow/config"
+	"github.com/fermat-tech/jobflow/engine"
 )
 
 func main() {

@@ -26,7 +26,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/fermat-tech/jobflow/internal/engine"
+	"github.com/fermat-tech/jobflow/engine"
 )
 
 // File is the top-level config document.

@@ -62,8 +62,8 @@ func NewFileStore(path string) *FileStore {
 }
 
 type fileState struct {
-	Version int              `json:"version"`
-	Runs    map[string]*Run  `json:"runs"`
+	Version int             `json:"version"`
+	Runs    map[string]*Run `json:"runs"`
 }
 
 // Load implements Store.
