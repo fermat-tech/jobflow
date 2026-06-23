@@ -35,6 +35,9 @@ import (
 	"github.com/fermat-tech/jobflow/engine"
 )
 
+// version is the build version, overridden via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "jobflow: "+err.Error())
@@ -63,6 +66,9 @@ func run(argv []string) error {
 			statePath = argv[i]
 		case "-h", "--help", "help":
 			usage()
+			return nil
+		case "-v", "--version", "version":
+			fmt.Printf("jobflow %s\n", version)
 			return nil
 		default:
 			rest = append(rest, argv[i])
@@ -284,6 +290,7 @@ Commands:
   restart <job> [step]   re-run a job from the top, or from a step name/1-based index
   validate               load config and report any errors
   handlers               list built-in Go step handlers
+  version                print the jobflow version
   help                   show this help
 
 Flags:
