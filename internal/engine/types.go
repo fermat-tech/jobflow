@@ -38,6 +38,13 @@ type Step struct {
 	// for restart-from-step.
 	Name string `json:"name"`
 
+	// DependsOn lists other steps in the same job that must complete before
+	// this step runs. If ANY step in a job sets DependsOn, the job runs as a
+	// DAG: steps with no declared deps start immediately (in parallel) and
+	// each step waits only for its listed deps. If NO step sets DependsOn, the
+	// job runs sequentially in declaration order (the default).
+	DependsOn []string `json:"dependsOn,omitempty"`
+
 	// Command is a shell command line, executed via the engine's configured
 	// shell (cmd /C on Windows, /bin/sh -c elsewhere).
 	Command string `json:"command,omitempty"`
@@ -104,8 +111,8 @@ type Run struct {
 	StartedAt  time.Time `json:"startedAt"`
 	FinishedAt time.Time `json:"finishedAt,omitempty"`
 	Steps      []StepRun `json:"steps"`
-	// FromStep records the step index a restart began at (0 for normal runs).
-	FromStep int `json:"fromStep"`
+	// FromStep names the step a restart resumed from ("" for a normal full run).
+	FromStep string `json:"fromStep,omitempty"`
 	// Note carries a human-readable explanation, e.g. why a run was skipped.
 	Note string `json:"note,omitempty"`
 }

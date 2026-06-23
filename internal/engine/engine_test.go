@@ -2,11 +2,13 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // newTestEngine returns an engine with a quiet logger and in-memory store.
@@ -165,10 +167,10 @@ func TestRestartFromStep(t *testing.T) {
 		t.Fatal("s2 and s3 should have run")
 	}
 
-	// Restart by 1-based index should match restart by name.
-	idx, err := eng.resolveStep("job", "2")
-	if err != nil || idx != 1 {
-		t.Fatalf("resolveStep index: got %d, %v", idx, err)
+	// Restart by 1-based index should resolve to the same step name.
+	name, err := eng.resolveStep("job", "2")
+	if err != nil || name != "s2" {
+		t.Fatalf("resolveStep index: got %q, %v", name, err)
 	}
 }
 
@@ -179,7 +181,7 @@ func TestDependencyGatingSkips(t *testing.T) {
 	eng.AddJob(&Job{Name: "c", DependsOn: []string{"a"}, Steps: []Step{{Name: "s", Handler: "noop"}}})
 
 	// a has not run yet, so a cron-style launch of c (gating on) must skip.
-	eng.launchAsync(context.Background(), eng.jobs["c"], TriggerCron, 0, false)
+	eng.launchAsync(context.Background(), eng.jobs["c"], TriggerCron, "", false)
 	eng.wg.Wait()
 
 	latest, _ := eng.Latest("c")
@@ -201,14 +203,14 @@ func TestDependencyCascade(t *testing.T) {
 	eng.AddJob(&Job{Name: "c", DependsOn: []string{"a", "b"}, Steps: []Step{{Name: "s", Handler: "markC"}}})
 
 	// Completing A alone must not trigger C (B still pending).
-	eng.launchAsync(context.Background(), eng.jobs["a"], TriggerManual, 0, true)
+	eng.launchAsync(context.Background(), eng.jobs["a"], TriggerManual, "", true)
 	eng.wg.Wait()
 	if atomic.LoadInt32(&cRan) != 0 {
 		t.Fatal("C ran before B succeeded")
 	}
 
 	// Completing B satisfies all of C's deps; cascade should run C exactly once.
-	eng.launchAsync(context.Background(), eng.jobs["b"], TriggerManual, 0, true)
+	eng.launchAsync(context.Background(), eng.jobs["b"], TriggerManual, "", true)
 	eng.wg.Wait()
 	if got := atomic.LoadInt32(&cRan); got != 1 {
 		t.Fatalf("C ran %d times, want 1", got)
@@ -246,5 +248,139 @@ func TestUnknownDependencyRejected(t *testing.T) {
 	eng.Register("noop", func(ctx context.Context, s Step) error { return nil })
 	if err := eng.AddJob(&Job{Name: "c", DependsOn: []string{"missing"}, Steps: []Step{{Name: "s", Handler: "noop"}}}); err == nil {
 		t.Fatal("expected error for dependency on unknown job")
+	}
+}
+
+// TestParallelStepsRunConcurrently proves that two steps sharing a single
+// upstream dependency actually overlap: each waits on a barrier that only
+// releases once both have started. Sequential execution would deadlock and the
+// per-step timeout would fail the run.
+func TestParallelStepsRunConcurrently(t *testing.T) {
+	eng := newTestEngine(t)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	barrier := func(ctx context.Context, s Step) error {
+		wg.Done()
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+		select {
+		case <-done:
+			return nil
+		case <-time.After(2 * time.Second):
+			return fmt.Errorf("step %q never saw its parallel peer start", s.Name)
+		}
+	}
+	eng.Register("noop", func(ctx context.Context, s Step) error { return nil })
+	eng.Register("barrier", barrier)
+	if err := eng.AddJob(&Job{Name: "j", Steps: []Step{
+		{Name: "a", Handler: "noop"},
+		{Name: "b", Handler: "barrier", DependsOn: []string{"a"}},
+		{Name: "c", Handler: "barrier", DependsOn: []string{"a"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := eng.Trigger(context.Background(), "j")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != StatusSucceeded {
+		t.Fatalf("status = %s; parallel steps likely ran sequentially", run.Status)
+	}
+}
+
+// TestStepFanInAndBlocking covers a diamond a -> {b, c} -> d where c fails:
+// b still runs, c fails, d is blocked (a dependency did not succeed), and the
+// job fails.
+func TestStepFanInAndBlocking(t *testing.T) {
+	eng := newTestEngine(t)
+	var dRan int32
+	eng.Register("ok", func(ctx context.Context, s Step) error { return nil })
+	eng.Register("boom", func(ctx context.Context, s Step) error { return io.ErrUnexpectedEOF })
+	eng.Register("markD", func(ctx context.Context, s Step) error { atomic.AddInt32(&dRan, 1); return nil })
+	if err := eng.AddJob(&Job{Name: "j", Steps: []Step{
+		{Name: "a", Handler: "ok"},
+		{Name: "b", Handler: "ok", DependsOn: []string{"a"}},
+		{Name: "c", Handler: "boom", DependsOn: []string{"a"}},
+		{Name: "d", Handler: "markD", DependsOn: []string{"b", "c"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	run, _ := eng.Trigger(context.Background(), "j")
+	if run.Status != StatusFailed {
+		t.Fatalf("status = %s, want failed", run.Status)
+	}
+	got := map[string]Status{}
+	for _, s := range run.Steps {
+		got[s.Name] = s.Status
+	}
+	if got["a"] != StatusSucceeded || got["b"] != StatusSucceeded {
+		t.Fatalf("a/b = %s/%s, want succeeded", got["a"], got["b"])
+	}
+	if got["c"] != StatusFailed {
+		t.Fatalf("c = %s, want failed", got["c"])
+	}
+	if got["d"] != StatusSkipped {
+		t.Fatalf("d = %s, want skipped (blocked)", got["d"])
+	}
+	if atomic.LoadInt32(&dRan) != 0 {
+		t.Fatal("d should not have executed when c failed")
+	}
+}
+
+// TestRestartRerunsOnlyDependents verifies restart-from-step over a DAG:
+// restarting a -> {b, c} from "b" re-runs only b (c does not depend on b).
+func TestRestartRerunsOnlyDependents(t *testing.T) {
+	eng := newTestEngine(t)
+	ran := map[string]int{}
+	var mu sync.Mutex
+	mk := func() HandlerFunc {
+		return func(ctx context.Context, s Step) error {
+			mu.Lock()
+			ran[s.Name]++
+			mu.Unlock()
+			return nil
+		}
+	}
+	eng.Register("h", mk())
+	if err := eng.AddJob(&Job{Name: "j", Steps: []Step{
+		{Name: "a", Handler: "h"},
+		{Name: "b", Handler: "h", DependsOn: []string{"a"}},
+		{Name: "c", Handler: "h", DependsOn: []string{"a"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := eng.Restart(context.Background(), "j", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != StatusSucceeded {
+		t.Fatalf("status = %s", run.Status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if ran["a"] != 0 || ran["c"] != 0 {
+		t.Fatalf("a/c should be presumed done on restart-from-b, ran a=%d c=%d", ran["a"], ran["c"])
+	}
+	if ran["b"] != 1 {
+		t.Fatalf("b should have run once, ran %d", ran["b"])
+	}
+}
+
+func TestStepCycleRejected(t *testing.T) {
+	eng := newTestEngine(t)
+	eng.Register("noop", func(ctx context.Context, s Step) error { return nil })
+	if err := eng.AddJob(&Job{Name: "j", Steps: []Step{
+		{Name: "a", Handler: "noop", DependsOn: []string{"b"}},
+		{Name: "b", Handler: "noop", DependsOn: []string{"a"}},
+	}}); err == nil {
+		t.Fatal("expected error for step dependency cycle")
+	}
+	if err := eng.AddJob(&Job{Name: "k", Steps: []Step{
+		{Name: "a", Handler: "noop", DependsOn: []string{"ghost"}},
+	}}); err == nil {
+		t.Fatal("expected error for step depending on unknown step")
 	}
 }

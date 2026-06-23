@@ -161,6 +161,22 @@ func validateJob(j *Job) error {
 			return fmt.Errorf("engine: job %q step %q must set exactly one of command/handler", j.Name, s.Name)
 		}
 	}
+
+	// Validate step-level dependencies: each must reference another step in
+	// this job, with no self-reference and no cycles.
+	for _, s := range j.Steps {
+		for _, dep := range s.DependsOn {
+			if dep == s.Name {
+				return fmt.Errorf("engine: job %q step %q depends on itself", j.Name, s.Name)
+			}
+			if !seen[dep] {
+				return fmt.Errorf("engine: job %q step %q depends on unknown step %q", j.Name, s.Name, dep)
+			}
+		}
+	}
+	if err := detectCycle(effectiveStepDeps(j), fmt.Sprintf("job %q step", j.Name)); err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
 	return nil
 }
 
@@ -287,7 +303,7 @@ func (e *Engine) tick(ctx context.Context) {
 	e.mu.Unlock()
 
 	for _, j := range due {
-		e.launchAsync(ctx, j, TriggerCron, 0, false)
+		e.launchAsync(ctx, j, TriggerCron, "", false)
 	}
 }
 
@@ -295,7 +311,7 @@ func (e *Engine) tick(ctx context.Context) {
 // bypassGating is false and the job has dependencies, the run is skipped
 // unless all dependencies most-recently succeeded. On success it cascades to
 // dependent jobs.
-func (e *Engine) launchAsync(ctx context.Context, job *Job, trigger Trigger, fromStep int, bypassGating bool) {
+func (e *Engine) launchAsync(ctx context.Context, job *Job, trigger Trigger, fromStep string, bypassGating bool) {
 	if !bypassGating && len(job.DependsOn) > 0 && !e.dependenciesSatisfied(job) {
 		e.recordSkip(job, trigger, "dependencies not satisfied")
 		return
@@ -336,7 +352,7 @@ func (e *Engine) cascade(ctx context.Context, target string) {
 	for _, d := range ready {
 		if e.dependenciesSatisfied(d) {
 			e.logf("dependency cascade: %q satisfied, triggering %q", target, d.Name)
-			e.launchAsync(ctx, d, TriggerDependency, 0, false)
+			e.launchAsync(ctx, d, TriggerDependency, "", false)
 		}
 	}
 }
@@ -346,24 +362,26 @@ func (e *Engine) cascade(ctx context.Context, target string) {
 // dependents — that is a scheduler behavior. Returns an error if the job is
 // unknown or already running.
 func (e *Engine) Trigger(ctx context.Context, name string) (*Run, error) {
-	return e.triggerFrom(ctx, name, 0, TriggerManual)
+	return e.triggerFrom(ctx, name, "", TriggerManual)
 }
 
 // Restart re-runs a job synchronously. fromStep selects where to resume:
-//   - "" or "top": from the first step
-//   - a step name: from that step
-//   - a 1-based index as a string: from that position
+//   - "" or "top": re-run every step
+//   - a step name: re-run that step
+//   - a 1-based index as a string: re-run the step at that position
 //
-// Steps before the resume point are recorded as skipped.
+// The chosen step and every step that (transitively) depends on it are
+// re-executed. All other steps are presumed to have completed in the prior run
+// and are recorded as skipped (and treated as satisfied dependencies).
 func (e *Engine) Restart(ctx context.Context, name, fromStep string) (*Run, error) {
-	idx, err := e.resolveStep(name, fromStep)
+	stepName, err := e.resolveStep(name, fromStep)
 	if err != nil {
 		return nil, err
 	}
-	return e.triggerFrom(ctx, name, idx, TriggerRestart)
+	return e.triggerFrom(ctx, name, stepName, TriggerRestart)
 }
 
-func (e *Engine) triggerFrom(ctx context.Context, name string, fromStep int, trigger Trigger) (*Run, error) {
+func (e *Engine) triggerFrom(ctx context.Context, name, fromStep string, trigger Trigger) (*Run, error) {
 	e.mu.Lock()
 	job, ok := e.jobs[name]
 	e.mu.Unlock()
@@ -377,27 +395,28 @@ func (e *Engine) triggerFrom(ctx context.Context, name string, fromStep int, tri
 	return e.executeRun(ctx, job, trigger, fromStep), nil
 }
 
-// resolveStep maps a fromStep selector to a 0-based step index.
-func (e *Engine) resolveStep(jobName, fromStep string) (int, error) {
+// resolveStep maps a fromStep selector to a step name. "" or "top" returns ""
+// (a full run). A 1-based index is converted to the corresponding step name.
+func (e *Engine) resolveStep(jobName, fromStep string) (string, error) {
 	job, ok := e.Job(jobName)
 	if !ok {
-		return 0, fmt.Errorf("engine: unknown job %q", jobName)
+		return "", fmt.Errorf("engine: unknown job %q", jobName)
 	}
 	if fromStep == "" || fromStep == "top" {
-		return 0, nil
+		return "", nil
 	}
-	for i, s := range job.Steps {
+	for _, s := range job.Steps {
 		if s.Name == fromStep {
-			return i, nil
+			return s.Name, nil
 		}
 	}
 	if n, err := strconv.Atoi(fromStep); err == nil {
 		if n < 1 || n > len(job.Steps) {
-			return 0, fmt.Errorf("engine: step index %d out of range 1..%d for job %q", n, len(job.Steps), jobName)
+			return "", fmt.Errorf("engine: step index %d out of range 1..%d for job %q", n, len(job.Steps), jobName)
 		}
-		return n - 1, nil
+		return job.Steps[n-1].Name, nil
 	}
-	return 0, fmt.Errorf("engine: job %q has no step %q", jobName, fromStep)
+	return "", fmt.Errorf("engine: job %q has no step %q", jobName, fromStep)
 }
 
 // dependenciesSatisfied reports whether every dependency's latest run
@@ -430,8 +449,29 @@ func (e *Engine) finishStart(name string) {
 	e.mu.Unlock()
 }
 
-// executeRun runs job's steps starting at fromStep and returns the final run.
-func (e *Engine) executeRun(ctx context.Context, job *Job, trigger Trigger, fromStep int) *Run {
+// stepState tracks a step's progress within a single run. "passed" means the
+// step satisfies its dependents (succeeded, tolerated-failure, or presumed
+// done on restart); "failed"/"blocked" do not.
+type stepState int
+
+const (
+	stPending stepState = iota
+	stRunning
+	stPassed
+	stFailed
+	stBlocked
+)
+
+// stepResult carries a finished step back from its worker goroutine.
+type stepResult struct {
+	idx int
+	sr  StepRun
+}
+
+// executeRun runs a job's steps as a DAG and returns the final run. When
+// fromStep is non-empty, only that step and its transitive dependents execute;
+// the rest are presumed done. Independent ready steps run concurrently.
+func (e *Engine) executeRun(ctx context.Context, job *Job, trigger Trigger, fromStep string) *Run {
 	start := e.now()
 	run := &Run{
 		JobName:   job.Name,
@@ -442,47 +482,128 @@ func (e *Engine) executeRun(ctx context.Context, job *Job, trigger Trigger, from
 		FromStep:  fromStep,
 		Steps:     make([]StepRun, len(job.Steps)),
 	}
-	for i, s := range job.Steps {
-		st := StepRun{Name: s.Name, Status: StatusPending}
-		if i < fromStep {
-			st.Status = StatusSkipped
-		}
-		run.Steps[i] = st
+
+	deps := effectiveStepDeps(job)
+	var runSet map[string]bool // nil => run all steps
+	if fromStep != "" {
+		runSet = transitiveStepClosure(deps, fromStep)
 	}
-	e.logf("job %q starting (%s, %d step(s) from #%d)", job.Name, trigger, len(job.Steps)-fromStep, fromStep+1)
+	inRun := func(name string) bool { return runSet == nil || runSet[name] }
+
+	idxOf := make(map[string]int, len(job.Steps))
+	state := make(map[string]stepState, len(job.Steps))
+	for i, s := range job.Steps {
+		idxOf[s.Name] = i
+		if inRun(s.Name) {
+			run.Steps[i] = StepRun{Name: s.Name, Status: StatusPending}
+			state[s.Name] = stPending
+		} else {
+			// Presumed completed in the prior run; satisfies dependents.
+			run.Steps[i] = StepRun{Name: s.Name, Status: StatusSkipped}
+			state[s.Name] = stPassed
+		}
+	}
+
+	toRun := 0
+	for _, st := range state {
+		if st == stPending {
+			toRun++
+		}
+	}
+	if fromStep == "" {
+		e.logf("job %q starting (%s, %d step(s))", job.Name, trigger, toRun)
+	} else {
+		e.logf("job %q starting (%s, from %q: %d step(s))", job.Name, trigger, fromStep, toRun)
+	}
 	e.persist(run)
 
-	jobFailed := false
-	for i := fromStep; i < len(job.Steps); i++ {
-		if ctx.Err() != nil {
-			run.Steps[i].Status = StatusSkipped
-			run.Steps[i].Error = "scheduler shutting down"
-			jobFailed = true
-			break
-		}
-		step := job.Steps[i]
-		err := e.runStep(ctx, &run.Steps[i], step)
-		if err != nil {
-			run.Steps[i].Status = StatusFailed
-			run.Steps[i].Error = err.Error()
-			e.logf("job %q step %q failed: %v", job.Name, step.Name, err)
-			if !step.ContinueOnError {
-				jobFailed = true
-				e.persist(run)
-				break
+	depsPassed := func(name string) bool {
+		for _, d := range deps[name] {
+			if state[d] != stPassed {
+				return false
 			}
-			e.logf("job %q step %q failed but continueOnError set; proceeding", job.Name, step.Name)
-		} else {
-			run.Steps[i].Status = StatusSucceeded
 		}
-		e.persist(run)
+		return true
+	}
+	depBlocked := func(name string) bool {
+		for _, d := range deps[name] {
+			if s := state[d]; s == stFailed || s == stBlocked {
+				return true
+			}
+		}
+		return false
 	}
 
-	// Any step still pending after an early exit is recorded as skipped.
-	for i := range run.Steps {
-		if run.Steps[i].Status == StatusPending {
-			run.Steps[i].Status = StatusSkipped
+	jobFailed := false
+	results := make(chan stepResult)
+	running := 0
+
+	for {
+		// Launch every pending step that is ready (deps passed), and mark as
+		// skipped any pending step whose deps can no longer be satisfied.
+		progressed := false
+		for _, s := range job.Steps {
+			i := idxOf[s.Name]
+			if state[s.Name] != stPending {
+				continue
+			}
+			switch {
+			case depBlocked(s.Name):
+				run.Steps[i].Status = StatusSkipped
+				run.Steps[i].Error = "skipped: a dependency did not succeed"
+				state[s.Name] = stBlocked
+				jobFailed = true
+				progressed = true
+			case ctx.Err() != nil:
+				run.Steps[i].Status = StatusSkipped
+				run.Steps[i].Error = "scheduler shutting down"
+				state[s.Name] = stBlocked
+				jobFailed = true
+				progressed = true
+			case depsPassed(s.Name):
+				run.Steps[i].Status = StatusRunning
+				run.Steps[i].StartedAt = e.now()
+				state[s.Name] = stRunning
+				running++
+				progressed = true
+				go func(idx int, step Step, base StepRun) {
+					sr := base
+					if err := e.runStep(ctx, &sr, step); err != nil {
+						sr.Status = StatusFailed
+						sr.Error = err.Error()
+					} else {
+						sr.Status = StatusSucceeded
+					}
+					results <- stepResult{idx: idx, sr: sr}
+				}(i, s, run.Steps[i])
+			}
 		}
+		if progressed {
+			e.persist(run)
+		}
+
+		if running == 0 {
+			break // no work in flight and nothing newly launched -> done
+		}
+
+		res := <-results
+		running--
+		step := job.Steps[res.idx]
+		run.Steps[res.idx] = res.sr
+		switch {
+		case res.sr.Status == StatusSucceeded:
+			state[step.Name] = stPassed
+		case step.ContinueOnError:
+			// Failure tolerated: record it, but dependents may proceed and the
+			// job is not failed by it.
+			state[step.Name] = stPassed
+			e.logf("job %q step %q failed but continueOnError set; proceeding", job.Name, step.Name)
+		default:
+			state[step.Name] = stFailed
+			jobFailed = true
+			e.logf("job %q step %q failed: %s", job.Name, step.Name, res.sr.Error)
+		}
+		e.persist(run)
 	}
 
 	if jobFailed {

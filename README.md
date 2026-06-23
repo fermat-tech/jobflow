@@ -21,8 +21,8 @@ go test ./...                 # tests
   - `command` — a shell command line (run via `cmd /C` on Windows,
     `/bin/sh -c` elsewhere; override with the config's `shell`).
   - `handler` — a named Go function registered with the engine.
-  Steps run sequentially. Per-step options: `retries`, `retryDelay`,
-  `timeout`, `continueOnError`.
+  Per-step options: `dependsOn` (other steps in the same job), `retries`,
+  `retryDelay`, `timeout`, `continueOnError`.
 - **Run** — one execution of a job, recording each step's status, attempt
   count, and error. The latest run per job is persisted to disk.
 
@@ -44,6 +44,35 @@ dependencies and cycles are rejected.
 
 > Cascade is a scheduler (`serve`) behavior. The one-shot `trigger` command
 > runs a single job and does not cascade to dependents.
+
+### Steps: sequential or parallel
+
+Steps form a DAG *within* a job, mirroring the job-level dependency model:
+
+- If **no** step declares `dependsOn`, the job runs **sequentially** in
+  declaration order (the default — existing configs are unchanged).
+- If **any** step declares `dependsOn`, the job runs as a DAG: steps with no
+  declared deps start immediately and in parallel, and each step waits only for
+  the steps it lists. Independent branches run concurrently; a step listing
+  several deps acts as a join point.
+
+```json
+{ "name": "checkout" },
+{ "name": "build-linux",   "dependsOn": ["checkout"] },
+{ "name": "build-windows", "dependsOn": ["checkout"] },
+{ "name": "release",       "dependsOn": ["build-linux", "build-windows"] }
+```
+
+Here the two builds run in parallel after `checkout`, and `release` runs once
+both finish (see `examples/parallel.json`). If a step fails (and is not
+`continueOnError`), steps depending on it are **skipped** ("a dependency did not
+succeed") and the job fails. Step-dependency cycles and references to unknown
+steps are rejected when the job is added.
+
+**Restart over a DAG:** `restart <job> <step>` re-runs that step *and every step
+that transitively depends on it*; all other steps are presumed done and recorded
+as skipped. E.g. `restart pipeline build-windows` re-runs `build-windows` and
+`release`, leaving `checkout` and the other builds untouched.
 
 ## CLI
 

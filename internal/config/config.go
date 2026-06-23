@@ -32,6 +32,7 @@ type Job struct {
 // Step mirrors engine.Step but takes durations as strings.
 type Step struct {
 	Name            string   `json:"name"`
+	DependsOn       []string `json:"dependsOn,omitempty"`
 	Command         string   `json:"command,omitempty"`
 	Handler         string   `json:"handler,omitempty"`
 	Args            []string `json:"args,omitempty"`
@@ -66,6 +67,7 @@ func (f *File) EngineJobs() ([]*engine.Job, error) {
 		for _, s := range j.Steps {
 			es := engine.Step{
 				Name:            s.Name,
+				DependsOn:       s.DependsOn,
 				Command:         s.Command,
 				Handler:         s.Handler,
 				Args:            s.Args,
