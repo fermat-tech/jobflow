@@ -158,6 +158,48 @@ Built-in handlers (for use straight from the CLI / tests): `noop`, `log`
 (prints its args), `sleep` (waits `args[0]`), `fail` (always errors — useful
 for exercising retries and gating).
 
+## DSL (friendlier than JSON)
+
+Hand-writing JSON is tedious. The `jobflow` DSL is an indentation-based
+equivalent that transpiles to the JSON config above. `run` and `handler` lines
+take their arguments verbatim — no quoting, commas, or braces:
+
+```
+job ci
+  every 1m
+  step checkout
+    run git pull
+  parallel
+    step build-linux
+      run make linux
+    step build-windows
+      run make windows
+  step release
+    handler log shipping release
+
+job deploy
+  needs ci
+  step ship
+    handler noop
+    retries 2
+    retry-delay 5s
+```
+
+Convert in either direction (file argument or stdin; output to stdout):
+
+```powershell
+jobflow to-json pipeline.jobflow > jobs.json   # DSL  -> JSON
+jobflow to-dsl  jobs.json                       # JSON -> DSL (for display)
+```
+
+Keywords: `shell` / `job` / `every` | `schedule` / `needs` (job- or
+step-level deps) / `step` / `parallel` / `run` | `handler` / `retries` /
+`retry-delay` / `timeout` / `continue-on-error`. Lines beginning with `#` are
+comments. JSON↔DSL round-trips preserve structure exactly; comments are not
+retained (JSON has no comment syntax). The same conversion is available as a
+library via package `dsl` (`ParseDSL`, `Document.JSON`, `FromJSON`,
+`Document.DSL`).
+
 ## Library use
 
 ```go
@@ -201,7 +243,8 @@ handlers.go  built-in Go step handlers (CLI only)
 engine/      Engine, jobs/steps/runs, registry, store, DAG validation
 cron/        dependency-free cron parser + Next()
 config/      JSON config -> engine jobs
-examples/    sample configs
+dsl/         indentation DSL <-> JSON config
+examples/    sample configs (.json and .jobflow)
 ```
 
-Import paths: `github.com/fermat-tech/jobflow/{engine,cron,config}`.
+Import paths: `github.com/fermat-tech/jobflow/{engine,cron,config,dsl}`.

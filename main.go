@@ -14,6 +14,8 @@
 //	restart <job> [step]  re-run a job, optionally from a step name or 1-based index
 //	validate              load the config and report any errors
 //	handlers              list built-in Go step handlers
+//	to-json [file]        transpile DSL to JSON config (stdin/stdout)
+//	to-dsl  [file]        render JSON config as DSL (stdin/stdout)
 //
 // Global flags:
 //
@@ -25,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -32,6 +35,7 @@ import (
 	"time"
 
 	"github.com/fermat-tech/jobflow/config"
+	"github.com/fermat-tech/jobflow/dsl"
 	"github.com/fermat-tech/jobflow/engine"
 )
 
@@ -90,6 +94,11 @@ func run(argv []string) error {
 			fmt.Println("  " + n)
 		}
 		return nil
+	}
+
+	// DSL conversions read a file (or stdin) and write to stdout; no config.
+	if cmd == "to-json" || cmd == "to-dsl" {
+		return doConvert(cmd, args, os.Stdout)
 	}
 
 	eng, err := buildEngine(configPath, statePath)
@@ -157,6 +166,45 @@ func buildEngine(configPath, statePath string) (*engine.Engine, error) {
 		return nil, err
 	}
 	return eng, nil
+}
+
+// doConvert transpiles between the DSL and the JSON config format. Input comes
+// from a file argument or, if absent or "-", from stdin; output is written to
+// out.
+func doConvert(cmd string, args []string, out io.Writer) error {
+	var data []byte
+	var err error
+	if len(args) == 0 || args[0] == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(args[0])
+	}
+	if err != nil {
+		return err
+	}
+
+	switch cmd {
+	case "to-json":
+		doc, err := dsl.ParseDSL(string(data))
+		if err != nil {
+			return err
+		}
+		j, err := doc.JSON()
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(j)
+		return err
+	case "to-dsl":
+		doc, err := dsl.FromJSON(data)
+		if err != nil {
+			return err
+		}
+		_, err = io.WriteString(out, doc.DSL())
+		return err
+	default:
+		return fmt.Errorf("unknown convert command %q", cmd)
+	}
 }
 
 func doServe(eng *engine.Engine) error {
@@ -290,6 +338,8 @@ Commands:
   restart <job> [step]   re-run a job from the top, or from a step name/1-based index
   validate               load config and report any errors
   handlers               list built-in Go step handlers
+  to-json [file]         transpile DSL (file or stdin) to JSON config on stdout
+  to-dsl  [file]         render JSON config (file or stdin) as DSL on stdout
   version                print the jobflow version
   help                   show this help
 

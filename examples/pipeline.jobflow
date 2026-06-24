@@ -1,0 +1,19 @@
+# Build, test in parallel, then deploy — far easier to read than JSON.
+job ci
+  every 1m
+  step checkout
+    run git pull
+  parallel
+    step build-linux
+      run make linux
+    step build-windows
+      run make windows
+  step release
+    handler log shipping release
+
+job deploy
+  needs ci
+  step ship
+    handler noop
+    retries 2
+    retry-delay 5s
