@@ -40,11 +40,27 @@ func TestNext(t *testing.T) {
 }
 
 func TestEvery(t *testing.T) {
-	base := time.Date(2026, 6, 23, 10, 30, 15, 0, time.UTC)
-	got := mustParse(t, "@every 90s").Next(base)
-	want := base.Add(90 * time.Second)
-	if !got.Equal(want) {
-		t.Errorf("@every 90s: Next = %v, want %v", got, want)
+	// @every aligns to wall-clock multiples of the interval, not to start time.
+	base := time.Date(2026, 6, 23, 10, 30, 15, 123456789, time.UTC)
+	cases := []struct {
+		spec string
+		want time.Time
+	}{
+		{"@every 1m", time.Date(2026, 6, 23, 10, 31, 0, 0, time.UTC)},
+		{"@every 30s", time.Date(2026, 6, 23, 10, 30, 30, 0, time.UTC)},
+		{"@every 1h", time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC)},
+	}
+	for _, c := range cases {
+		got := mustParse(t, c.spec).Next(base)
+		if !got.Equal(c.want) {
+			t.Errorf("%q: Next = %v, want %v", c.spec, got, c.want)
+		}
+	}
+
+	// On an exact boundary, Next advances to the following one (strictly after).
+	onBoundary := time.Date(2026, 6, 23, 10, 31, 0, 0, time.UTC)
+	if got := mustParse(t, "@every 1m").Next(onBoundary); !got.Equal(onBoundary.Add(time.Minute)) {
+		t.Errorf("@every 1m on boundary: Next = %v, want %v", got, onBoundary.Add(time.Minute))
 	}
 }
 

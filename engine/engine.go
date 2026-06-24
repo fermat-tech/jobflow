@@ -25,7 +25,9 @@ type Options struct {
 	// Shell is the command prefix used to run Command steps. Defaults to
 	// {"cmd", "/C"} on Windows and {"/bin/sh", "-c"} elsewhere.
 	Shell []string
-	// Logger receives scheduler activity. Defaults to log.Default().
+	// Logger receives scheduler activity. The engine prepends its own
+	// RFC3339Nano timestamp to each line, so a custom logger should be
+	// flag-less (log.New(w, "", 0)). Defaults to a flag-less stderr logger.
 	Logger *log.Logger
 	// Stdout/Stderr receive Command step output. Default to os.Stdout/Stderr.
 	Stdout, Stderr io.Writer
@@ -52,7 +54,8 @@ type Engine struct {
 	nextFire map[string]time.Time // next scheduled fire per scheduled job
 	started  bool
 
-	wg sync.WaitGroup // tracks in-flight async runs
+	wake chan struct{}  // signals the Run loop to recompute its sleep deadline
+	wg   sync.WaitGroup // tracks in-flight async runs
 }
 
 // New creates an Engine with the given options.
@@ -69,6 +72,7 @@ func New(opts Options) *Engine {
 		latest:   make(map[string]*Run),
 		running:  make(map[string]bool),
 		nextFire: make(map[string]time.Time),
+		wake:     make(chan struct{}, 1),
 	}
 	if e.store == nil {
 		e.store = NewMemoryStore()
@@ -81,7 +85,8 @@ func New(opts Options) *Engine {
 		}
 	}
 	if e.logger == nil {
-		e.logger = log.Default()
+		// Flag-less: the engine prepends its own RFC3339Nano timestamp in logf.
+		e.logger = log.New(os.Stderr, "", 0)
 	}
 	if e.stdout == nil {
 		e.stdout = os.Stdout
@@ -135,6 +140,11 @@ func (e *Engine) AddJob(j *Job) error {
 	e.order = append(e.order, j.Name)
 	if e.started && j.compiled != nil {
 		e.nextFire[j.Name] = j.compiled.Next(e.now())
+		// Nudge a running Run loop to recompute its sleep deadline.
+		select {
+		case e.wake <- struct{}{}:
+		default:
+		}
 	}
 	return nil
 }
@@ -271,22 +281,65 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	e.logf("scheduler started with %d job(s)", len(e.order))
 
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
 	for {
+		// Sleep precisely until the soonest scheduled fire time so jobs run on
+		// their wall-clock boundary (e.g. the top of the minute), rather than
+		// polling. If no jobs are scheduled, wait only for shutdown or a new
+		// job being added.
+		var timerC <-chan time.Time
+		var timer *time.Timer
+		if next, ok := e.soonestFire(); ok {
+			d := next.Sub(e.now())
+			if d < 0 {
+				d = 0
+			}
+			timer = time.NewTimer(d)
+			timerC = timer.C
+		}
+
 		select {
 		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
 			e.logf("scheduler stopping; waiting for in-flight runs")
 			e.wg.Wait()
 			return ctx.Err()
-		case <-ticker.C:
-			e.tick(ctx)
+		case <-e.wake:
+			// A job was added (or its schedule changed); recompute the deadline.
+			if timer != nil {
+				timer.Stop()
+			}
+		case <-timerC:
+			e.fireDue(ctx)
 		}
 	}
 }
 
-// tick fires any jobs whose scheduled time has arrived.
-func (e *Engine) tick(ctx context.Context) {
+// soonestFire returns the earliest pending fire time across scheduled jobs.
+func (e *Engine) soonestFire() (time.Time, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var soonest time.Time
+	found := false
+	for _, name := range e.order {
+		if e.jobs[name].compiled == nil {
+			continue
+		}
+		nf, ok := e.nextFire[name]
+		if !ok {
+			continue
+		}
+		if !found || nf.Before(soonest) {
+			soonest, found = nf, true
+		}
+	}
+	return soonest, found
+}
+
+// fireDue launches every scheduled job whose fire time has arrived and advances
+// its next fire time.
+func (e *Engine) fireDue(ctx context.Context) {
 	now := e.now()
 	var due []*Job
 	e.mu.Lock()
@@ -699,7 +752,8 @@ func (e *Engine) persist(run *Run) {
 
 func (e *Engine) logf(format string, args ...any) {
 	if e.logger != nil {
-		e.logger.Printf(format, args...)
+		// Prepend an ISO-8601 / RFC3339Nano timestamp from the engine clock.
+		e.logger.Print(e.now().Format(time.RFC3339Nano) + " " + fmt.Sprintf(format, args...))
 	}
 }
 

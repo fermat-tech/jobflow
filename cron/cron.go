@@ -20,7 +20,9 @@
 //	@weekly               "0 0 * * 0"
 //	@daily / @midnight    "0 0 * * *"
 //	@hourly               "0 * * * *"
-//	@every <duration>     fixed interval, e.g. "@every 30s" or "@every 1h30m"
+//	@every <duration>     fixed interval, e.g. "@every 30s" or "@every 1h30m";
+//	                      fires on wall-clock multiples of the interval (the
+//	                      top of the minute/hour), not relative to start time
 package cron
 
 import (
@@ -227,7 +229,11 @@ func parseValue(s string, names map[string]int) (int, error) {
 // indicates an impossible schedule such as "0 0 30 2 *").
 func (s *Schedule) Next(t time.Time) time.Time {
 	if s.every != 0 {
-		return t.Add(s.every)
+		// Align to wall-clock multiples of the interval rather than to the
+		// scheduler's start time: @every 1m fires at the top of each minute,
+		// @every 1h at the top of each hour, and so on. (For intervals of an
+		// hour or longer this aligns to UTC, per time.Truncate.)
+		return t.Truncate(s.every).Add(s.every)
 	}
 
 	// Start from the next whole minute.
