@@ -117,6 +117,27 @@ func TestExplicitDependsOnUnionsWithStage(t *testing.T) {
 	}
 }
 
+func TestRedirectionFields(t *testing.T) {
+	doc := `{"jobs":[{"name":"j","steps":[{"name":"s","command":"x","stdin":"i.txt","stdout":"o.txt","stdoutAppend":true,"stderr":"e.txt"}]}]}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "j.json")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := f.EngineJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := jobs[0].Steps[0]
+	if s.Stdin != "i.txt" || s.Stdout != "o.txt" || !s.StdoutAppend || s.Stderr != "e.txt" || s.StderrAppend {
+		t.Fatalf("redirection mapping wrong: %+v", s)
+	}
+}
+
 func TestNoWarnField(t *testing.T) {
 	doc := `{"noWarn":["all","shell-missing-flag"],"jobs":[{"name":"j","steps":[{"name":"s","command":"x"}]}]}`
 	dir := t.TempDir()

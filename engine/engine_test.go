@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -259,6 +261,94 @@ func TestLogTimestampFixedWidth(t *testing.T) {
 	if got := buf.String(); got != want {
 		t.Fatalf("log line mismatch:\n got: %q\nwant: %q", got, want)
 	}
+}
+
+func TestRedirectStdoutOverwriteAndAppend(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.txt")
+	eng := newTestEngine(t)
+	mustAdd(t, eng, &Job{Name: "w", Steps: []Step{{Name: "s", Command: "echo first", Stdout: out}}})
+	mustAdd(t, eng, &Job{Name: "a", Steps: []Step{{Name: "s", Command: "echo second", Stdout: out, StdoutAppend: true}}})
+
+	mustSucceed(t, eng, "w")
+	if got := readTrim(t, out); got != "first" {
+		t.Fatalf("overwrite: file = %q, want \"first\"", got)
+	}
+	mustSucceed(t, eng, "a")
+	got := readTrim(t, out)
+	if !strings.Contains(got, "first") || !strings.Contains(got, "second") {
+		t.Fatalf("append: file = %q, want both lines", got)
+	}
+}
+
+func TestRedirectStdin(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.txt")
+	out := filepath.Join(dir, "out.txt")
+	if err := os.WriteFile(in, []byte("banana\napple\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := newTestEngine(t)
+	// sort reads stdin and writes stdout on both Windows and Unix.
+	mustAdd(t, eng, &Job{Name: "j", Steps: []Step{{Name: "s", Command: "sort", Stdin: in, Stdout: out}}})
+	mustSucceed(t, eng, "j")
+
+	got := readTrim(t, out)
+	ai, bi := strings.Index(got, "apple"), strings.Index(got, "banana")
+	if ai < 0 || bi < 0 || ai > bi {
+		t.Fatalf("sorted stdin->stdout wrong: %q", got)
+	}
+}
+
+func TestRedirectStdinMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	eng := newTestEngine(t)
+	mustAdd(t, eng, &Job{Name: "j", Steps: []Step{{Name: "s", Command: "echo hi", Stdin: filepath.Join(dir, "nope.txt")}}})
+	run, err := eng.Trigger(context.Background(), "j")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != StatusFailed {
+		t.Fatalf("status = %s, want failed", run.Status)
+	}
+	if !strings.Contains(run.Steps[0].Error, "stdin") {
+		t.Fatalf("error should mention stdin: %s", run.Steps[0].Error)
+	}
+}
+
+func TestRedirectOnHandlerRejected(t *testing.T) {
+	eng := newTestEngine(t)
+	eng.Register("noop", func(ctx context.Context, s Step) error { return nil })
+	if err := eng.AddJob(&Job{Name: "j", Steps: []Step{{Name: "s", Handler: "noop", Stdout: "x.txt"}}}); err == nil {
+		t.Fatal("expected error: redirection on a handler step")
+	}
+}
+
+func mustAdd(t *testing.T, e *Engine, j *Job) {
+	t.Helper()
+	if err := e.AddJob(j); err != nil {
+		t.Fatalf("AddJob %q: %v", j.Name, err)
+	}
+}
+
+func mustSucceed(t *testing.T, e *Engine, job string) {
+	t.Helper()
+	run, err := e.Trigger(context.Background(), job)
+	if err != nil {
+		t.Fatalf("trigger %q: %v", job, err)
+	}
+	if run.Status != StatusSucceeded {
+		t.Fatalf("job %q: status %s, step error %q", job, run.Status, run.Steps[0].Error)
+	}
+}
+
+func readTrim(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func TestShellMissingFlagWarning(t *testing.T) {

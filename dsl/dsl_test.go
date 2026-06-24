@@ -160,6 +160,24 @@ func TestNoWarnRoundTrips(t *testing.T) {
 	}
 }
 
+func TestRedirectionRoundTrips(t *testing.T) {
+	src := "job j\n  step s\n    run mycmd\n    stdin in.txt\n    stdout out.txt\n    stderr-append err.log\n"
+	doc, err := dsl.ParseDSL(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := doc.Jobs[0].Stages[0].Steps[0]
+	if st.Stdin != "in.txt" || st.Stdout != "out.txt" || st.StdoutAppend {
+		t.Fatalf("stdin/stdout parse: %+v", st)
+	}
+	if st.Stderr != "err.log" || !st.StderrAppend {
+		t.Fatalf("stderr-append parse: %+v", st)
+	}
+	if got := doc.DSL(); got != src {
+		t.Fatalf("redirection did not round trip:\n%s", got)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	bad := map[string]string{
 		"both run and handler":    "job j\n  step s\n    run x\n    handler noop\n",

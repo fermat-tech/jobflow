@@ -26,6 +26,9 @@ type node struct {
 //	  needs <job>, <job>             (optional, job-level deps)
 //	  step <name>                    (a single-step stage)
 //	    run <command...>             (OR) handler <name> [args...]
+//	    stdin <path>                 (command steps only)
+//	    stdout <path>                (OR) stdout-append <path>
+//	    stderr <path>                (OR) stderr-append <path>
 //	    needs <step>, <step>         (optional, step-level deps)
 //	    retries <n>
 //	    retry-delay <dur>
@@ -150,6 +153,31 @@ func parseStep(n *node, rest string) (*Step, error) {
 			}
 			s.Handler = toks[0]
 			s.Args = toks[1:]
+		case "stdin":
+			if r == "" {
+				return nil, lineErr(c, "'stdin' requires a file path")
+			}
+			s.Stdin = r
+		case "stdout":
+			if r == "" {
+				return nil, lineErr(c, "'stdout' requires a file path")
+			}
+			s.Stdout, s.StdoutAppend = r, false
+		case "stdout-append":
+			if r == "" {
+				return nil, lineErr(c, "'stdout-append' requires a file path")
+			}
+			s.Stdout, s.StdoutAppend = r, true
+		case "stderr":
+			if r == "" {
+				return nil, lineErr(c, "'stderr' requires a file path")
+			}
+			s.Stderr, s.StderrAppend = r, false
+		case "stderr-append":
+			if r == "" {
+				return nil, lineErr(c, "'stderr-append' requires a file path")
+			}
+			s.Stderr, s.StderrAppend = r, true
 		case "needs":
 			s.Needs = parseList(r)
 		case "retries":

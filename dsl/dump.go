@@ -66,6 +66,23 @@ func writeStep(b *strings.Builder, s Step, indent string) {
 		}
 		b.WriteString(line + "\n")
 	}
+	if s.Stdin != "" {
+		b.WriteString(body + "stdin " + s.Stdin + "\n")
+	}
+	if s.Stdout != "" {
+		kw := "stdout"
+		if s.StdoutAppend {
+			kw = "stdout-append"
+		}
+		b.WriteString(body + kw + " " + s.Stdout + "\n")
+	}
+	if s.Stderr != "" {
+		kw := "stderr"
+		if s.StderrAppend {
+			kw = "stderr-append"
+		}
+		b.WriteString(body + kw + " " + s.Stderr + "\n")
+	}
 	if len(s.Needs) > 0 {
 		b.WriteString(body + "needs " + strings.Join(s.Needs, ", ") + "\n")
 	}

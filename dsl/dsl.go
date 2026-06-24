@@ -60,6 +60,11 @@ type Step struct {
 	RetryDelay      string // Go duration string, e.g. "30s"
 	Timeout         string
 	ContinueOnError bool
+	Stdin           string
+	Stdout          string
+	StdoutAppend    bool
+	Stderr          string
+	StderrAppend    bool
 }
 
 // --- JSON shapes mirroring package config's on-disk format ---
@@ -74,6 +79,11 @@ type jStep struct {
 	RetryDelay      string   `json:"retryDelay,omitempty"`
 	Timeout         string   `json:"timeout,omitempty"`
 	ContinueOnError bool     `json:"continueOnError,omitempty"`
+	Stdin           string   `json:"stdin,omitempty"`
+	Stdout          string   `json:"stdout,omitempty"`
+	StdoutAppend    bool     `json:"stdoutAppend,omitempty"`
+	Stderr          string   `json:"stderr,omitempty"`
+	StderrAppend    bool     `json:"stderrAppend,omitempty"`
 }
 
 type jParallel struct {
@@ -104,6 +114,11 @@ func (s Step) toJSON() jStep {
 		RetryDelay:      s.RetryDelay,
 		Timeout:         s.Timeout,
 		ContinueOnError: s.ContinueOnError,
+		Stdin:           s.Stdin,
+		Stdout:          s.Stdout,
+		StdoutAppend:    s.StdoutAppend,
+		Stderr:          s.Stderr,
+		StderrAppend:    s.StderrAppend,
 	}
 }
 
@@ -118,6 +133,11 @@ func stepFromJSON(j jStep) Step {
 		RetryDelay:      j.RetryDelay,
 		Timeout:         j.Timeout,
 		ContinueOnError: j.ContinueOnError,
+		Stdin:           j.Stdin,
+		Stdout:          j.Stdout,
+		StdoutAppend:    j.StdoutAppend,
+		Stderr:          j.Stderr,
+		StderrAppend:    j.StderrAppend,
 	}
 }
 

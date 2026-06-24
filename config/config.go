@@ -59,6 +59,11 @@ type Step struct {
 	RetryDelay      string   `json:"retryDelay,omitempty"`
 	Timeout         string   `json:"timeout,omitempty"`
 	ContinueOnError bool     `json:"continueOnError,omitempty"`
+	Stdin           string   `json:"stdin,omitempty"`
+	Stdout          string   `json:"stdout,omitempty"`
+	StdoutAppend    bool     `json:"stdoutAppend,omitempty"`
+	Stderr          string   `json:"stderr,omitempty"`
+	StderrAppend    bool     `json:"stderrAppend,omitempty"`
 }
 
 // group is a parallel stage: { "parallel": [ ...steps... ] }.
@@ -149,6 +154,11 @@ func toEngineStep(jobName string, s Step) (engine.Step, error) {
 		Args:            s.Args,
 		Retries:         s.Retries,
 		ContinueOnError: s.ContinueOnError,
+		Stdin:           s.Stdin,
+		Stdout:          s.Stdout,
+		StdoutAppend:    s.StdoutAppend,
+		Stderr:          s.Stderr,
+		StderrAppend:    s.StderrAppend,
 	}
 	if s.RetryDelay != "" {
 		d, err := time.ParseDuration(s.RetryDelay)

@@ -22,7 +22,8 @@ go test ./...                 # tests
     `/bin/sh -c` elsewhere; override with the config's `shell`).
   - `handler` — a named Go function registered with the engine.
   Per-step options: `dependsOn` (other steps in the same job), `retries`,
-  `retryDelay`, `timeout`, `continueOnError`.
+  `retryDelay`, `timeout`, `continueOnError`, and stream redirection
+  (`stdin`/`stdout`/`stderr`, see below).
 - **Run** — one execution of a job, recording each step's status, attempt
   count, and error. The latest run per job is persisted to disk.
 
@@ -157,6 +158,27 @@ restricted, a day matches if **either** matches (standard cron behavior).
 
 `shell` is optional. Step `retryDelay` and `timeout` are Go duration strings.
 
+### Stream redirection
+
+A command step can redirect its standard streams to files via config, so the
+command string needs no shell redirection operators (and no quoting headaches):
+
+```json
+{ "name": "report", "command": "echo This is a test",
+  "stdout": "out/report.txt" },
+{ "name": "log", "command": "mytool",
+  "stdin": "in.txt", "stdout": "run.log", "stdoutAppend": true,
+  "stderr": "run.log" }
+```
+
+`stdin` is a path opened for reading. `stdout`/`stderr` write to a file —
+truncating by default, or appending when `stdoutAppend`/`stderrAppend` is true.
+Pointing `stdout` and `stderr` at the same path merges them into one handle
+(like `> f 2>&1`). Empty fields inherit (stdin = null device; stdout/stderr =
+the engine's writers). Redirection applies to command steps only — it's
+rejected on handler steps. In the DSL: `stdin <path>`, `stdout <path>` /
+`stdout-append <path>`, `stderr <path>` / `stderr-append <path>`.
+
 A custom `shell` must include the flag that runs a command string — `-c` for
 sh/bash/zsh/posh, `/C` for cmd, `-Command` for PowerShell. A one-element shell
 like `["bash"]` makes the shell treat the whole command as a *script filename*
@@ -209,8 +231,9 @@ jobflow to-json pipeline.jobflow > jobs.json   # DSL  -> JSON
 jobflow to-dsl  jobs.json                       # JSON -> DSL (for display)
 ```
 
-Keywords: `shell` / `job` / `every` | `schedule` / `needs` (job- or
-step-level deps) / `step` / `parallel` / `run` | `handler` / `retries` /
+Keywords: `shell` / `no-warn` / `job` / `every` | `schedule` / `needs` (job- or
+step-level deps) / `step` / `parallel` / `run` | `handler` / `stdin` /
+`stdout` | `stdout-append` / `stderr` | `stderr-append` / `retries` /
 `retry-delay` / `timeout` / `continue-on-error`. Lines beginning with `#` are
 comments. JSON↔DSL round-trips preserve structure exactly; comments are not
 retained (JSON has no comment syntax). The same conversion is available as a

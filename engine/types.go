@@ -67,6 +67,21 @@ type Step struct {
 
 	// Timeout, if > 0, bounds a single attempt of the step.
 	Timeout time.Duration `json:"timeout,omitempty"`
+
+	// Stdin, Stdout, and Stderr redirect a Command step's standard streams to
+	// files, so the command string needs no shell redirection operators. They
+	// are honored only for Command steps. Empty means inherit: Stdin is the
+	// null device; Stdout/Stderr use the engine's writers.
+	//
+	// Stdin is a path opened for reading. StdoutAppend/StderrAppend select
+	// append (true) vs truncate (false) for the corresponding output file. If
+	// Stdout and Stderr name the same file, they share one handle (like
+	// "> f 2>&1").
+	Stdin        string `json:"stdin,omitempty"`
+	Stdout       string `json:"stdout,omitempty"`
+	StdoutAppend bool   `json:"stdoutAppend,omitempty"`
+	Stderr       string `json:"stderr,omitempty"`
+	StderrAppend bool   `json:"stderrAppend,omitempty"`
 }
 
 // Job is a named, scheduled unit composed of ordered steps. A job may have a

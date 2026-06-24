@@ -187,6 +187,9 @@ func validateJob(j *Job) error {
 		if hasCmd == hasHandler {
 			return fmt.Errorf("engine: job %q step %q must set exactly one of command/handler", j.Name, s.Name)
 		}
+		if hasHandler && (s.Stdin != "" || s.Stdout != "" || s.Stderr != "") {
+			return fmt.Errorf("engine: job %q step %q sets stream redirection, which is only supported for command steps", j.Name, s.Name)
+		}
 	}
 
 	// Validate step-level dependencies: each must reference another step in
@@ -725,19 +728,72 @@ func (e *Engine) execStep(ctx context.Context, step Step) error {
 	if step.Handler != "" {
 		return e.registry.call(ctx, step)
 	}
-	return e.runCommand(ctx, step.Command)
+	return e.runCommand(ctx, step)
 }
 
-// runCommand runs a shell command line via the configured shell.
-func (e *Engine) runCommand(ctx context.Context, command string) error {
-	args := append(append([]string(nil), e.shell[1:]...), command)
+// runCommand runs a step's shell command line via the configured shell,
+// applying any per-step stream redirection.
+func (e *Engine) runCommand(ctx context.Context, step Step) error {
+	args := append(append([]string(nil), e.shell[1:]...), step.Command)
 	cmd := exec.CommandContext(ctx, e.shell[0], args...)
+
+	if step.Stdin != "" {
+		f, err := os.Open(step.Stdin)
+		if err != nil {
+			return fmt.Errorf("stdin %q: %w", step.Stdin, err)
+		}
+		defer f.Close()
+		cmd.Stdin = f
+	}
+
+	// Default to the engine's writers; override per stream when redirected.
 	cmd.Stdout = e.stdout
 	cmd.Stderr = e.stderr
+
+	var outFile *os.File
+	if step.Stdout != "" {
+		f, err := openRedirect(step.Stdout, step.StdoutAppend)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		outFile = f
+		cmd.Stdout = f
+	}
+	if step.Stderr != "" {
+		// Same target as stdout: share the handle so both streams interleave
+		// into one file (like "> f 2>&1") instead of clobbering each other.
+		if outFile != nil && step.Stderr == step.Stdout {
+			cmd.Stderr = outFile
+		} else {
+			f, err := openRedirect(step.Stderr, step.StderrAppend)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			cmd.Stderr = f
+		}
+	}
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil
+}
+
+// openRedirect opens path for writing, truncating or appending per appendMode.
+func openRedirect(path string, appendMode bool) (*os.File, error) {
+	flag := os.O_CREATE | os.O_WRONLY
+	if appendMode {
+		flag |= os.O_APPEND
+	} else {
+		flag |= os.O_TRUNC
+	}
+	f, err := os.OpenFile(path, flag, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open %q for output: %w", path, err)
+	}
+	return f, nil
 }
 
 // recordSkip persists a skipped run for a job whose dependencies were not met.
