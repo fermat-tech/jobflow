@@ -25,9 +25,10 @@ type Options struct {
 	// Shell is the command prefix used to run Command steps. Defaults to
 	// {"cmd", "/C"} on Windows and {"/bin/sh", "-c"} elsewhere.
 	Shell []string
-	// Logger receives scheduler activity. The engine prepends its own
-	// RFC3339Nano timestamp to each line, so a custom logger should be
-	// flag-less (log.New(w, "", 0)). Defaults to a flag-less stderr logger.
+	// Logger receives scheduler activity. The engine prepends its own ISO-8601
+	// timestamp (RFC3339 with fixed 9-digit nanoseconds) to each line, so a
+	// custom logger should be flag-less (log.New(w, "", 0)). Defaults to a
+	// flag-less stderr logger.
 	Logger *log.Logger
 	// Stdout/Stderr receive Command step output. Default to os.Stdout/Stderr.
 	Stdout, Stderr io.Writer
@@ -750,10 +751,15 @@ func (e *Engine) persist(run *Run) {
 	}
 }
 
+// logTimeLayout is RFC3339 with a fixed, zero-filled 9-digit nanosecond field
+// (unlike time.RFC3339Nano, which trims trailing zeros and so varies in width).
+// The fixed width keeps the message column aligned across log lines.
+const logTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
 func (e *Engine) logf(format string, args ...any) {
 	if e.logger != nil {
-		// Prepend an ISO-8601 / RFC3339Nano timestamp from the engine clock.
-		e.logger.Print(e.now().Format(time.RFC3339Nano) + " " + fmt.Sprintf(format, args...))
+		// Prepend an ISO-8601 timestamp (fixed nanosecond width) from the clock.
+		e.logger.Print(e.now().Format(logTimeLayout) + " " + fmt.Sprintf(format, args...))
 	}
 }
 

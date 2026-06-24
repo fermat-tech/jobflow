@@ -7,3 +7,6 @@ scratch/
 
 # Release artifacts
 dist/
+
+# Editor/OS backup files
+*~

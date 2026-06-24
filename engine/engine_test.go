@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -240,6 +241,22 @@ func TestCycleDetection(t *testing.T) {
 	}
 	if err := eng.AddJob(&Job{Name: "b", DependsOn: []string{"a"}, Steps: []Step{{Name: "s", Handler: "noop"}}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLogTimestampFixedWidth(t *testing.T) {
+	var buf bytes.Buffer
+	// 459000 ns -> ".000459000" (zero-filled to 9 digits, not trimmed).
+	fixed := time.Date(2026, 6, 24, 13, 17, 0, 459000, time.FixedZone("CDT", -5*3600))
+	eng := New(Options{
+		Logger: log.New(&buf, "", 0),
+		Now:    func() time.Time { return fixed },
+	})
+	eng.logf("job %q already running; skipping cron trigger", "sleep")
+
+	want := "2026-06-24T13:17:00.000459000-05:00 job \"sleep\" already running; skipping cron trigger\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("log line mismatch:\n got: %q\nwant: %q", got, want)
 	}
 }
 
