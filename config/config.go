@@ -34,6 +34,8 @@ type File struct {
 	// Shell overrides the command interpreter for Command steps, e.g.
 	// ["pwsh", "-NoProfile", "-Command"]. Optional.
 	Shell []string `json:"shell,omitempty"`
+	// NoWarn lists warning codes to silence (or "all"). Optional.
+	NoWarn []string `json:"noWarn,omitempty"`
 	// Jobs are the job definitions.
 	Jobs []Job `json:"jobs"`
 }

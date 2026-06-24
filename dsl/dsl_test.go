@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fermat-tech/jobflow/config"
@@ -135,6 +136,27 @@ func TestHandlerArgQuotingRoundTrips(t *testing.T) {
 	}
 	if doc.DSL() != src {
 		t.Fatalf("quoting did not round trip:\n%s", doc.DSL())
+	}
+}
+
+func TestNoWarnRoundTrips(t *testing.T) {
+	src := "no-warn shell-missing-flag all\n\njob j\n  step s\n    run x\n"
+	doc, err := dsl.ParseDSL(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.NoWarn) != 2 || doc.NoWarn[0] != "shell-missing-flag" || doc.NoWarn[1] != "all" {
+		t.Fatalf("NoWarn = %v", doc.NoWarn)
+	}
+	if got := doc.DSL(); got != src {
+		t.Fatalf("no-warn did not round trip:\n%s", got)
+	}
+	j, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(j), `"noWarn"`) {
+		t.Fatalf("JSON missing noWarn:\n%s", j)
 	}
 }
 

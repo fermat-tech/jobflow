@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -257,6 +258,41 @@ func TestLogTimestampFixedWidth(t *testing.T) {
 	want := "2026-06-24T13:17:00.000459000-05:00 job \"sleep\" already running; skipping cron trigger\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("log line mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestShellMissingFlagWarning(t *testing.T) {
+	cases := []struct {
+		name     string
+		shell    []string
+		suppress []string
+		wantWarn bool
+	}{
+		{"bash no flag", []string{"/usr/bin/bash"}, nil, true},
+		{"bash with -c", []string{"/usr/bin/bash", "-c"}, nil, false},
+		{"bash.exe no flag", []string{`C:\tools\bash.exe`}, nil, true},
+		{"cmd no flag", []string{"cmd"}, nil, true},
+		{"powershell single is fine", []string{"powershell.exe"}, nil, false},
+		{"unknown shell single is fine", []string{"myshell"}, nil, false},
+		{"default two-element", nil, nil, false},
+		{"suppress all", []string{"bash"}, []string{"all"}, false},
+		{"suppress by code", []string{"bash"}, []string{"shell-missing-flag"}, false},
+		{"suppress unrelated code", []string{"bash"}, []string{"other-code"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			New(Options{
+				Logger:           log.New(&buf, "", 0),
+				Shell:            c.shell,
+				SuppressWarnings: c.suppress,
+				Now:              func() time.Time { return time.Unix(0, 0).UTC() },
+			})
+			got := strings.Contains(buf.String(), string(WarnShellMissingFlag))
+			if got != c.wantWarn {
+				t.Fatalf("warn=%v, want %v; output=%q", got, c.wantWarn, buf.String())
+			}
+		})
 	}
 }
 

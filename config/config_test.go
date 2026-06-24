@@ -117,6 +117,22 @@ func TestExplicitDependsOnUnionsWithStage(t *testing.T) {
 	}
 }
 
+func TestNoWarnField(t *testing.T) {
+	doc := `{"noWarn":["all","shell-missing-flag"],"jobs":[{"name":"j","steps":[{"name":"s","command":"x"}]}]}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "j.json")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.NoWarn) != 2 || f.NoWarn[0] != "all" || f.NoWarn[1] != "shell-missing-flag" {
+		t.Fatalf("NoWarn = %v", f.NoWarn)
+	}
+}
+
 func TestEmptyParallelGroupRejected(t *testing.T) {
 	doc := `{"jobs":[{"name":"p","steps":[{"parallel":[]}]}]}`
 	dir := t.TempDir()

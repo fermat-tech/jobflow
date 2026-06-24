@@ -21,6 +21,7 @@
 //
 //	-config string   path to the jobs config file (default "jobflow.json")
 //	-state  string   path to the persisted state file (default "jobflow-state.json")
+//	-no-warn string  silence warnings: "all" or comma-separated codes
 package main
 
 import (
@@ -53,6 +54,7 @@ func run(argv []string) error {
 	// Manual flag parsing so flags may precede the subcommand.
 	configPath := "jobflow.json"
 	statePath := "jobflow-state.json"
+	var noWarn []string
 	var rest []string
 	for i := 0; i < len(argv); i++ {
 		switch argv[i] {
@@ -68,6 +70,16 @@ func run(argv []string) error {
 			}
 			i++
 			statePath = argv[i]
+		case "-no-warn", "--no-warn":
+			if i+1 >= len(argv) {
+				return errors.New("-no-warn needs a value (\"all\" or comma-separated codes)")
+			}
+			i++
+			for _, c := range strings.Split(argv[i], ",") {
+				if c = strings.TrimSpace(c); c != "" {
+					noWarn = append(noWarn, c)
+				}
+			}
 		case "-h", "--help", "help":
 			usage()
 			return nil
@@ -101,7 +113,7 @@ func run(argv []string) error {
 		return doConvert(cmd, args, os.Stdout)
 	}
 
-	eng, err := buildEngine(configPath, statePath)
+	eng, err := buildEngine(configPath, statePath, noWarn)
 	if err != nil {
 		return err
 	}
@@ -141,8 +153,8 @@ func run(argv []string) error {
 }
 
 // buildEngine loads config and constructs an engine with built-in handlers and
-// a persistent file store.
-func buildEngine(configPath, statePath string) (*engine.Engine, error) {
+// a persistent file store. cliNoWarn adds to any noWarn codes from the config.
+func buildEngine(configPath, statePath string, cliNoWarn []string) (*engine.Engine, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, err
@@ -152,8 +164,9 @@ func buildEngine(configPath, statePath string) (*engine.Engine, error) {
 		return nil, err
 	}
 	eng := engine.New(engine.Options{
-		Store: engine.NewFileStore(statePath),
-		Shell: cfg.Shell,
+		Store:            engine.NewFileStore(statePath),
+		Shell:            cfg.Shell,
+		SuppressWarnings: append(append([]string(nil), cfg.NoWarn...), cliNoWarn...),
 	})
 	registerHandlers(eng)
 	for _, j := range jobs {
@@ -346,5 +359,7 @@ Commands:
 Flags:
   -config FILE   jobs config (default "jobflow.json")
   -state  FILE   persisted run state (default "jobflow-state.json")
+  -no-warn LIST  silence warnings: "all" or comma-separated codes
+                 (e.g. -no-warn shell-missing-flag)
 `)
 }

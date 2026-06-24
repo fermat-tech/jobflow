@@ -29,8 +29,9 @@ import (
 // Document is the parsed representation of a config, shared by the DSL and JSON
 // sides.
 type Document struct {
-	Shell []string // optional shell command vector
-	Jobs  []Job
+	Shell  []string // optional shell command vector
+	NoWarn []string // optional warning codes to silence (or "all")
+	Jobs   []Job
 }
 
 // Job is a named, optionally scheduled unit composed of ordered stages.
@@ -87,8 +88,9 @@ type jJob struct {
 }
 
 type jFile struct {
-	Shell []string `json:"shell,omitempty"`
-	Jobs  []jJob   `json:"jobs"`
+	Shell  []string `json:"shell,omitempty"`
+	NoWarn []string `json:"noWarn,omitempty"`
+	Jobs   []jJob   `json:"jobs"`
 }
 
 func (s Step) toJSON() jStep {
@@ -125,7 +127,7 @@ func (d *Document) JSON() ([]byte, error) {
 	if err := d.validate(); err != nil {
 		return nil, err
 	}
-	f := jFile{Shell: d.Shell}
+	f := jFile{Shell: d.Shell, NoWarn: d.NoWarn}
 	for _, job := range d.Jobs {
 		jj := jJob{Name: job.Name, Schedule: job.Schedule, DependsOn: job.Needs}
 		for _, st := range job.Stages {
@@ -151,8 +153,9 @@ func (d *Document) JSON() ([]byte, error) {
 // FromJSON parses config JSON into a Document.
 func FromJSON(data []byte) (*Document, error) {
 	var in struct {
-		Shell []string `json:"shell"`
-		Jobs  []struct {
+		Shell  []string `json:"shell"`
+		NoWarn []string `json:"noWarn"`
+		Jobs   []struct {
 			Name      string            `json:"name"`
 			Schedule  string            `json:"schedule"`
 			DependsOn []string          `json:"dependsOn"`
@@ -163,7 +166,7 @@ func FromJSON(data []byte) (*Document, error) {
 		return nil, fmt.Errorf("dsl: parse JSON: %w", err)
 	}
 
-	doc := &Document{Shell: in.Shell}
+	doc := &Document{Shell: in.Shell, NoWarn: in.NoWarn}
 	for _, j := range in.Jobs {
 		job := Job{Name: j.Name, Schedule: j.Schedule, Needs: j.DependsOn}
 		for i, raw := range j.Steps {

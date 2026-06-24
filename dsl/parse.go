@@ -20,6 +20,7 @@ type node struct {
 // and lines whose first non-space character is '#' are ignored.
 //
 //	shell <args...>                  (optional, top level)
+//	no-warn <codes...>               (optional, top level; or "all")
 //	job <name>
 //	  every <dur> | schedule <spec>  (optional)
 //	  needs <job>, <job>             (optional, job-level deps)
@@ -51,6 +52,8 @@ func ParseDSL(src string) (*Document, error) {
 			}
 			shellSeen = true
 			doc.Shell = tokenize(rest)
+		case "no-warn":
+			doc.NoWarn = append(doc.NoWarn, tokenize(rest)...)
 		case "job":
 			job, err := parseJob(n, rest)
 			if err != nil {
@@ -58,7 +61,7 @@ func ParseDSL(src string) (*Document, error) {
 			}
 			doc.Jobs = append(doc.Jobs, *job)
 		default:
-			return nil, lineErr(n, "unexpected %q at top level (want 'job' or 'shell')", kw)
+			return nil, lineErr(n, "unexpected %q at top level (want 'job', 'shell', or 'no-warn')", kw)
 		}
 	}
 	if len(doc.Jobs) == 0 {

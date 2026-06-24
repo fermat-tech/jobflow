@@ -97,9 +97,12 @@ trigger <job>          run a job once now (bypasses dependency gating)
 restart <job> [step]   re-run from the top, or from a step name / 1-based index
 validate               load config and report any errors
 handlers               list built-in Go step handlers
+to-json [file]         transpile DSL to JSON config (stdin/stdout)
+to-dsl  [file]         render JSON config as DSL (stdin/stdout)
 
 -config FILE   jobs config       (default "jobflow.json")
 -state  FILE   persisted state    (default "jobflow-state.json")
+-no-warn LIST  silence warnings: "all" or comma-separated codes
 ```
 
 Examples:
@@ -153,6 +156,20 @@ restricted, a day matches if **either** matches (standard cron behavior).
 ```
 
 `shell` is optional. Step `retryDelay` and `timeout` are Go duration strings.
+
+A custom `shell` must include the flag that runs a command string — `-c` for
+sh/bash/zsh/posh, `/C` for cmd, `-Command` for PowerShell. A one-element shell
+like `["bash"]` makes the shell treat the whole command as a *script filename*
+(failing with exit 127). jobflow warns about this at startup:
+
+```
+warning [shell-missing-flag]: shell "bash" has no command-flag argument ...
+```
+
+Silence warnings with `-no-warn <code>` / `-no-warn all` on the CLI, or
+`"noWarn": ["shell-missing-flag"]` / `["all"]` in the config (DSL: `no-warn
+shell-missing-flag`). PowerShell, pwsh, and unrecognized shells are never
+warned about (they accept a bare command string).
 
 Built-in handlers (for use straight from the CLI / tests): `noop`, `log`
 (prints its args), `sleep` (waits `args[0]`), `fail` (always errors — useful

@@ -9,8 +9,17 @@ import (
 // output re-parses to an equivalent Document, so JSON->DSL->JSON is stable.
 func (d *Document) DSL() string {
 	var b strings.Builder
+	header := false
 	if len(d.Shell) > 0 {
-		b.WriteString("shell " + joinArgs(d.Shell) + "\n\n")
+		b.WriteString("shell " + joinArgs(d.Shell) + "\n")
+		header = true
+	}
+	if len(d.NoWarn) > 0 {
+		b.WriteString("no-warn " + joinArgs(d.NoWarn) + "\n")
+		header = true
+	}
+	if header && len(d.Jobs) > 0 {
+		b.WriteByte('\n')
 	}
 	for i, job := range d.Jobs {
 		if i > 0 {

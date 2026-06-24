@@ -34,6 +34,9 @@ type Options struct {
 	Stdout, Stderr io.Writer
 	// Now is the clock, injectable for tests. Defaults to time.Now.
 	Now func() time.Time
+	// SuppressWarnings lists Warning codes to silence (see the Warn* constants).
+	// The special value "all" silences every warning.
+	SuppressWarnings []string
 }
 
 // Engine schedules and runs jobs. It is safe for concurrent use; Trigger and
@@ -57,6 +60,9 @@ type Engine struct {
 
 	wake chan struct{}  // signals the Run loop to recompute its sleep deadline
 	wg   sync.WaitGroup // tracks in-flight async runs
+
+	suppressAllWarn bool
+	suppressedWarn  map[Warning]bool
 }
 
 // New creates an Engine with the given options.
@@ -98,6 +104,16 @@ func New(opts Options) *Engine {
 	if e.now == nil {
 		e.now = time.Now
 	}
+
+	e.suppressedWarn = make(map[Warning]bool)
+	for _, w := range opts.SuppressWarnings {
+		if w == suppressAllWarnings {
+			e.suppressAllWarn = true
+		} else {
+			e.suppressedWarn[Warning(w)] = true
+		}
+	}
+	e.emitStartupWarnings()
 	return e
 }
 
