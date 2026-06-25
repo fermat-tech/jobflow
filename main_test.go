@@ -20,6 +20,13 @@ const dslSample = `job ci
       run make windows
 `
 
+// TestResolveVersion guards against regressing to a meaningless placeholder.
+func TestResolveVersion(t *testing.T) {
+	if v := resolveVersion(); v == "" || v == "dev" {
+		t.Fatalf("resolveVersion returned %q; want a real version or VCS-derived value", v)
+	}
+}
+
 // TestConvertToJSON checks the to-json CLI path produces JSON that parses.
 func TestConvertToJSON(t *testing.T) {
 	dir := t.TempDir()

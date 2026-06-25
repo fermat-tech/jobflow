@@ -31,6 +31,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -40,8 +41,46 @@ import (
 	"github.com/fermat-tech/jobflow/engine"
 )
 
-// version is the build version, overridden via -ldflags "-X main.version=...".
-var version = "dev"
+// version is stamped into release builds via -ldflags "-X main.version=...".
+// When empty (a plain go build or `go install`), resolveVersion derives it from
+// the embedded build info instead.
+var version = ""
+
+// resolveVersion returns the build version, preferring the linker-stamped value
+// and otherwise falling back to Go's build info: the module version for
+// `go install <module>@<ver>`, or the VCS revision for a local build.
+func resolveVersion() string {
+	if version != "" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "devel"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	var rev string
+	var dirty bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev != "" {
+		if len(rev) > 12 {
+			rev = rev[:12]
+		}
+		if dirty {
+			return "devel-" + rev + "+dirty"
+		}
+		return "devel-" + rev
+	}
+	return "devel"
+}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -84,7 +123,7 @@ func run(argv []string) error {
 			usage()
 			return nil
 		case "-v", "--version", "version":
-			fmt.Printf("jobflow %s\n", version)
+			fmt.Printf("jobflow %s\n", resolveVersion())
 			return nil
 		default:
 			rest = append(rest, argv[i])
