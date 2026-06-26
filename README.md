@@ -178,6 +178,30 @@ remote host over SSH, then select one per job or per step:
 ]
 ```
 
+The same thing in the DSL — a top-level `runner <name>` block (with `ssh` and/or
+`shell` lines) defines a runner; a `runner <name>` line in a job or step selects
+one:
+
+```
+runner prod
+  ssh ssh deploy@prod
+  shell /bin/bash -c
+runner ps
+  shell pwsh -NoProfile -Command
+
+job deploy
+  runner prod
+  step ship
+    run make release
+
+job mixed
+  step local
+    run echo here
+  step remote
+    run df -h
+    runner prod
+```
+
 - A runner with `ssh` runs the command on that host via your local OpenSSH
   client (no extra dependency); jobflow single-quotes the command for the remote
   `shell` (default `/bin/sh -c`), so quoting and operators survive the trip. A
@@ -189,8 +213,6 @@ remote host over SSH, then select one per job or per step:
 - Runners apply to **command steps only** (handlers run in-process and can't go
   remote — a runner on a handler step is rejected). Stream redirection still
   works: remote output comes back into your local `stdout`/`stderr` files.
-- DSL: define with a `runner <name>` block (`ssh …` / `shell …` lines); select
-  with a `runner <name>` line in a job or step.
 
 ### Stream redirection
 
