@@ -138,6 +138,34 @@ func TestRedirectionFields(t *testing.T) {
 	}
 }
 
+func TestRunnersMapping(t *testing.T) {
+	doc := `{
+	  "runners": { "prod": { "ssh": ["ssh","deploy@prod"], "shell": ["/bin/bash","-c"] } },
+	  "jobs": [ { "name": "j", "runner": "prod",
+	    "steps": [ { "name": "s", "command": "make", "runner": "prod" } ] } ]
+	}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "j.json")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runners := f.EngineRunners()
+	if len(runners) != 1 || runners[0].Name != "prod" || runners[0].SSH[1] != "deploy@prod" {
+		t.Fatalf("EngineRunners = %+v", runners)
+	}
+	jobs, err := f.EngineJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jobs[0].Runner != "prod" || jobs[0].Steps[0].Runner != "prod" {
+		t.Fatalf("job/step runner not mapped: %+v", jobs[0])
+	}
+}
+
 func TestNoWarnField(t *testing.T) {
 	doc := `{"noWarn":["all","shell-missing-flag"],"jobs":[{"name":"j","steps":[{"name":"s","command":"x"}]}]}`
 	dir := t.TempDir()

@@ -52,6 +52,10 @@ type Step struct {
 	// Handler names a Go handler registered with the engine via Register.
 	Handler string `json:"handler,omitempty"`
 
+	// Runner names the runner (interpreter/remote target) for this command
+	// step, overriding the job's runner. Command steps only. Empty inherits.
+	Runner string `json:"runner,omitempty"`
+
 	// Args are passed through to a Handler step (ignored for Command steps).
 	Args []string `json:"args,omitempty"`
 
@@ -97,6 +101,11 @@ type Job struct {
 	// DependsOn lists jobs that must have most-recently succeeded before this
 	// job will execute its steps. See Engine docs for the exact semantics.
 	DependsOn []string `json:"dependsOn,omitempty"`
+
+	// Runner names the default runner (interpreter/remote target) for this
+	// job's command steps. A step's own Runner overrides it. Empty uses the
+	// engine's local shell.
+	Runner string `json:"runner,omitempty"`
 
 	// Steps are executed in order.
 	Steps []Step `json:"steps"`

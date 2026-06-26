@@ -23,15 +23,24 @@ package dsl
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 )
 
 // Document is the parsed representation of a config, shared by the DSL and JSON
 // sides.
 type Document struct {
-	Shell  []string // optional shell command vector
-	NoWarn []string // optional warning codes to silence (or "all")
-	Jobs   []Job
+	Shell   []string // optional shell command vector
+	NoWarn  []string // optional warning codes to silence (or "all")
+	Runners []Runner // optional named interpreters/remote targets
+	Jobs    []Job
+}
+
+// Runner is a named interpreter or remote SSH target.
+type Runner struct {
+	Name  string
+	SSH   []string
+	Shell []string
 }
 
 // Job is a named, optionally scheduled unit composed of ordered stages.
@@ -39,6 +48,7 @@ type Job struct {
 	Name     string
 	Schedule string   // cron spec, e.g. "@every 1m" or "0 2 * * *"; empty if none
 	Needs    []string // job-level dependencies
+	Runner   string   // default runner name for command steps; empty = local
 	Stages   []Stage
 }
 
@@ -55,6 +65,7 @@ type Step struct {
 	Needs           []string // step-level dependencies (advanced DAGs)
 	Command         string
 	Handler         string
+	Runner          string // runner name override for this command step
 	Args            []string
 	Retries         int
 	RetryDelay      string // Go duration string, e.g. "30s"
@@ -79,6 +90,7 @@ type jStep struct {
 	RetryDelay      string   `json:"retryDelay,omitempty"`
 	Timeout         string   `json:"timeout,omitempty"`
 	ContinueOnError bool     `json:"continueOnError,omitempty"`
+	Runner          string   `json:"runner,omitempty"`
 	Stdin           string   `json:"stdin,omitempty"`
 	Stdout          string   `json:"stdout,omitempty"`
 	StdoutAppend    bool     `json:"stdoutAppend,omitempty"`
@@ -90,17 +102,24 @@ type jParallel struct {
 	Parallel []jStep `json:"parallel"`
 }
 
+type jRunner struct {
+	SSH   []string `json:"ssh,omitempty"`
+	Shell []string `json:"shell,omitempty"`
+}
+
 type jJob struct {
 	Name      string   `json:"name"`
 	Schedule  string   `json:"schedule,omitempty"`
 	DependsOn []string `json:"dependsOn,omitempty"`
+	Runner    string   `json:"runner,omitempty"`
 	Steps     []any    `json:"steps"`
 }
 
 type jFile struct {
-	Shell  []string `json:"shell,omitempty"`
-	NoWarn []string `json:"noWarn,omitempty"`
-	Jobs   []jJob   `json:"jobs"`
+	Shell   []string           `json:"shell,omitempty"`
+	NoWarn  []string           `json:"noWarn,omitempty"`
+	Runners map[string]jRunner `json:"runners,omitempty"`
+	Jobs    []jJob             `json:"jobs"`
 }
 
 func (s Step) toJSON() jStep {
@@ -114,6 +133,7 @@ func (s Step) toJSON() jStep {
 		RetryDelay:      s.RetryDelay,
 		Timeout:         s.Timeout,
 		ContinueOnError: s.ContinueOnError,
+		Runner:          s.Runner,
 		Stdin:           s.Stdin,
 		Stdout:          s.Stdout,
 		StdoutAppend:    s.StdoutAppend,
@@ -133,6 +153,7 @@ func stepFromJSON(j jStep) Step {
 		RetryDelay:      j.RetryDelay,
 		Timeout:         j.Timeout,
 		ContinueOnError: j.ContinueOnError,
+		Runner:          j.Runner,
 		Stdin:           j.Stdin,
 		Stdout:          j.Stdout,
 		StdoutAppend:    j.StdoutAppend,
@@ -148,8 +169,14 @@ func (d *Document) JSON() ([]byte, error) {
 		return nil, err
 	}
 	f := jFile{Shell: d.Shell, NoWarn: d.NoWarn}
+	if len(d.Runners) > 0 {
+		f.Runners = make(map[string]jRunner, len(d.Runners))
+		for _, r := range d.Runners {
+			f.Runners[r.Name] = jRunner{SSH: r.SSH, Shell: r.Shell}
+		}
+	}
 	for _, job := range d.Jobs {
-		jj := jJob{Name: job.Name, Schedule: job.Schedule, DependsOn: job.Needs}
+		jj := jJob{Name: job.Name, Schedule: job.Schedule, DependsOn: job.Needs, Runner: job.Runner}
 		for _, st := range job.Stages {
 			if st.Parallel {
 				grp := jParallel{}
@@ -173,12 +200,14 @@ func (d *Document) JSON() ([]byte, error) {
 // FromJSON parses config JSON into a Document.
 func FromJSON(data []byte) (*Document, error) {
 	var in struct {
-		Shell  []string `json:"shell"`
-		NoWarn []string `json:"noWarn"`
-		Jobs   []struct {
+		Shell   []string           `json:"shell"`
+		NoWarn  []string           `json:"noWarn"`
+		Runners map[string]jRunner `json:"runners"`
+		Jobs    []struct {
 			Name      string            `json:"name"`
 			Schedule  string            `json:"schedule"`
 			DependsOn []string          `json:"dependsOn"`
+			Runner    string            `json:"runner"`
 			Steps     []json.RawMessage `json:"steps"`
 		} `json:"jobs"`
 	}
@@ -187,8 +216,12 @@ func FromJSON(data []byte) (*Document, error) {
 	}
 
 	doc := &Document{Shell: in.Shell, NoWarn: in.NoWarn}
+	for _, name := range sortedKeys(in.Runners) {
+		r := in.Runners[name]
+		doc.Runners = append(doc.Runners, Runner{Name: name, SSH: r.SSH, Shell: r.Shell})
+	}
 	for _, j := range in.Jobs {
-		job := Job{Name: j.Name, Schedule: j.Schedule, Needs: j.DependsOn}
+		job := Job{Name: j.Name, Schedule: j.Schedule, Needs: j.DependsOn, Runner: j.Runner}
 		for i, raw := range j.Steps {
 			var probe struct {
 				Parallel []jStep `json:"parallel"`
@@ -210,6 +243,17 @@ func FromJSON(data []byte) (*Document, error) {
 		doc.Jobs = append(doc.Jobs, job)
 	}
 	return doc, nil
+}
+
+// sortedKeys returns the keys of a runner map in sorted order, for
+// deterministic Document construction from JSON.
+func sortedKeys(m map[string]jRunner) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // validate checks structural invariants shared by both output paths.

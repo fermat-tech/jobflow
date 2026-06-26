@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -349,6 +350,113 @@ func readTrim(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(b))
+}
+
+func TestRunnerInvocation(t *testing.T) {
+	localDefault := []string{"/bin/sh", "-c"}
+	cases := []struct {
+		name     string
+		runner   Runner
+		command  string
+		wantName string
+		wantArgs []string
+	}{
+		{
+			name:     "local default shell",
+			runner:   Runner{Name: "x"},
+			command:  "echo hi",
+			wantName: "/bin/sh",
+			wantArgs: []string{"-c", "echo hi"},
+		},
+		{
+			name:     "local interpreter override",
+			runner:   Runner{Name: "ps", Shell: []string{"pwsh", "-NoProfile", "-Command"}},
+			command:  "Get-Date",
+			wantName: "pwsh",
+			wantArgs: []string{"-NoProfile", "-Command", "Get-Date"},
+		},
+		{
+			name:     "ssh default remote shell, preserves quoting",
+			runner:   Runner{Name: "prod", SSH: []string{"ssh", "deploy@prod"}},
+			command:  `echo "a b"`,
+			wantName: "ssh",
+			wantArgs: []string{"deploy@prod", `/bin/sh -c 'echo "a b"'`},
+		},
+		{
+			name:     "ssh flags + custom remote shell + embedded single quote",
+			runner:   Runner{Name: "p2", SSH: []string{"ssh", "-p", "2222", "u@h"}, Shell: []string{"/bin/bash", "-c"}},
+			command:  `it's ok`,
+			wantName: "ssh",
+			wantArgs: []string{"-p", "2222", "u@h", `/bin/bash -c 'it'\''s ok'`},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotName, gotArgs := c.runner.invocation(c.command, localDefault)
+			if gotName != c.wantName {
+				t.Fatalf("name = %q, want %q", gotName, c.wantName)
+			}
+			if !reflect.DeepEqual(gotArgs, c.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", gotArgs, c.wantArgs)
+			}
+		})
+	}
+}
+
+func TestLocalRunnerExecutes(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.txt")
+	eng := New(Options{
+		Store:   NewMemoryStore(),
+		Logger:  log.New(io.Discard, "", 0),
+		Runners: []Runner{{Name: "loc"}}, // local, default shell
+	})
+	mustAdd(t, eng, &Job{Name: "j", Steps: []Step{{Name: "s", Command: "echo viarunner", Runner: "loc", Stdout: out}}})
+	mustSucceed(t, eng, "j")
+	if got := readTrim(t, out); got != "viarunner" {
+		t.Fatalf("runner output = %q, want viarunner", got)
+	}
+}
+
+func TestJobRunnerInheritedByCommandStepsOnly(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "o.txt")
+	var handlerRan int32
+	eng := New(Options{
+		Store:   NewMemoryStore(),
+		Logger:  log.New(io.Discard, "", 0),
+		Runners: []Runner{{Name: "loc"}},
+	})
+	eng.Register("mark", func(ctx context.Context, s Step) error { atomic.AddInt32(&handlerRan, 1); return nil })
+	mustAdd(t, eng, &Job{Name: "j", Runner: "loc", Steps: []Step{
+		{Name: "cmd", Command: "echo ok", Stdout: out},
+		{Name: "h", Handler: "mark"},
+	}})
+	mustSucceed(t, eng, "j")
+	if got := readTrim(t, out); got != "ok" {
+		t.Fatalf("command step via job runner: %q", got)
+	}
+	if atomic.LoadInt32(&handlerRan) != 1 {
+		t.Fatal("handler step should still run under a job runner")
+	}
+}
+
+func TestUnknownRunnerRejected(t *testing.T) {
+	eng := newTestEngine(t)
+	if err := eng.AddJob(&Job{Name: "a", Steps: []Step{{Name: "s", Command: "echo", Runner: "ghost"}}}); err == nil {
+		t.Fatal("expected error for unknown step runner")
+	}
+	if err := eng.AddJob(&Job{Name: "b", Runner: "ghost", Steps: []Step{{Name: "s", Command: "echo"}}}); err == nil {
+		t.Fatal("expected error for unknown job runner")
+	}
+}
+
+func TestRunnerOnHandlerRejected(t *testing.T) {
+	eng := newTestEngine(t)
+	eng.Register("noop", func(ctx context.Context, s Step) error { return nil })
+	if err := eng.AddJob(&Job{Name: "j", Steps: []Step{{Name: "s", Handler: "noop", Runner: "x"}}}); err == nil {
+		t.Fatal("expected error: runner on a handler step")
+	}
 }
 
 func TestShellMissingFlagWarning(t *testing.T) {

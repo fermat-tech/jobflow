@@ -18,6 +18,16 @@ func (d *Document) DSL() string {
 		b.WriteString("no-warn " + joinArgs(d.NoWarn) + "\n")
 		header = true
 	}
+	for _, r := range d.Runners {
+		b.WriteString("runner " + r.Name + "\n")
+		if len(r.SSH) > 0 {
+			b.WriteString("  ssh " + joinArgs(r.SSH) + "\n")
+		}
+		if len(r.Shell) > 0 {
+			b.WriteString("  shell " + joinArgs(r.Shell) + "\n")
+		}
+		header = true
+	}
 	if header && len(d.Jobs) > 0 {
 		b.WriteByte('\n')
 	}
@@ -38,6 +48,9 @@ func writeJob(b *strings.Builder, job Job) {
 		} else {
 			b.WriteString("  schedule " + job.Schedule + "\n")
 		}
+	}
+	if job.Runner != "" {
+		b.WriteString("  runner " + job.Runner + "\n")
 	}
 	if len(job.Needs) > 0 {
 		b.WriteString("  needs " + strings.Join(job.Needs, ", ") + "\n")
@@ -65,6 +78,9 @@ func writeStep(b *strings.Builder, s Step, indent string) {
 			line += " " + joinArgs(s.Args)
 		}
 		b.WriteString(line + "\n")
+	}
+	if s.Runner != "" {
+		b.WriteString(body + "runner " + s.Runner + "\n")
 	}
 	if s.Stdin != "" {
 		b.WriteString(body + "stdin " + s.Stdin + "\n")

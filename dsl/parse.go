@@ -21,11 +21,16 @@ type node struct {
 //
 //	shell <args...>                  (optional, top level)
 //	no-warn <codes...>               (optional, top level; or "all")
+//	runner <name>                    (optional, top level; defines a runner)
+//	  ssh <args...>                  (remote: local ssh invocation)
+//	  shell <args...>                (the interpreter)
 //	job <name>
 //	  every <dur> | schedule <spec>  (optional)
 //	  needs <job>, <job>             (optional, job-level deps)
+//	  runner <name>                  (optional, default runner for the job)
 //	  step <name>                    (a single-step stage)
 //	    run <command...>             (OR) handler <name> [args...]
+//	    runner <name>                (optional, command steps only)
 //	    stdin <path>                 (command steps only)
 //	    stdout <path>                (OR) stdout-append <path>
 //	    stderr <path>                (OR) stderr-append <path>
@@ -57,6 +62,12 @@ func ParseDSL(src string) (*Document, error) {
 			doc.Shell = tokenize(rest)
 		case "no-warn":
 			doc.NoWarn = append(doc.NoWarn, tokenize(rest)...)
+		case "runner":
+			rn, err := parseRunner(n, rest)
+			if err != nil {
+				return nil, err
+			}
+			doc.Runners = append(doc.Runners, *rn)
 		case "job":
 			job, err := parseJob(n, rest)
 			if err != nil {
@@ -64,7 +75,7 @@ func ParseDSL(src string) (*Document, error) {
 			}
 			doc.Jobs = append(doc.Jobs, *job)
 		default:
-			return nil, lineErr(n, "unexpected %q at top level (want 'job', 'shell', or 'no-warn')", kw)
+			return nil, lineErr(n, "unexpected %q at top level (want 'job', 'shell', 'no-warn', or 'runner')", kw)
 		}
 	}
 	if len(doc.Jobs) == 0 {
@@ -94,6 +105,8 @@ func parseJob(n *node, rest string) (*Job, error) {
 			job.Schedule = r
 		case "needs":
 			job.Needs = parseList(r)
+		case "runner":
+			job.Runner = firstToken(r)
 		case "step":
 			s, err := parseStep(c, r)
 			if err != nil {
@@ -111,6 +124,26 @@ func parseJob(n *node, rest string) (*Job, error) {
 		}
 	}
 	return job, nil
+}
+
+func parseRunner(n *node, rest string) (*Runner, error) {
+	name := firstToken(rest)
+	if name == "" {
+		return nil, lineErr(n, "'runner' definition requires a name")
+	}
+	rn := &Runner{Name: name}
+	for _, c := range n.children {
+		kw, r := keyword(c.text)
+		switch kw {
+		case "ssh":
+			rn.SSH = tokenize(r)
+		case "shell":
+			rn.Shell = tokenize(r)
+		default:
+			return nil, lineErr(c, "unexpected %q in runner %q (want 'ssh' or 'shell')", kw, name)
+		}
+	}
+	return rn, nil
 }
 
 func parseParallel(n *node) (*Stage, error) {
@@ -153,6 +186,8 @@ func parseStep(n *node, rest string) (*Step, error) {
 			}
 			s.Handler = toks[0]
 			s.Args = toks[1:]
+		case "runner":
+			s.Runner = firstToken(r)
 		case "stdin":
 			if r == "" {
 				return nil, lineErr(c, "'stdin' requires a file path")

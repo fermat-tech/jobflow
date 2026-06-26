@@ -22,8 +22,8 @@ go test ./...                 # tests
     `/bin/sh -c` elsewhere; override with the config's `shell`).
   - `handler` — a named Go function registered with the engine.
   Per-step options: `dependsOn` (other steps in the same job), `retries`,
-  `retryDelay`, `timeout`, `continueOnError`, and stream redirection
-  (`stdin`/`stdout`/`stderr`, see below).
+  `retryDelay`, `timeout`, `continueOnError`, `runner` (interpreter / remote
+  target, see below), and stream redirection (`stdin`/`stdout`/`stderr`).
 - **Run** — one execution of a job, recording each step's status, attempt
   count, and error. The latest run per job is persisted to disk.
 
@@ -158,6 +158,40 @@ restricted, a day matches if **either** matches (standard cron behavior).
 
 `shell` is optional. Step `retryDelay` and `timeout` are Go duration strings.
 
+### Runners (interpreters & remote execution)
+
+A command step runs through a **runner** — by default the engine's local
+`shell`. Define named runners to use a different interpreter, or to run on a
+remote host over SSH, then select one per job or per step:
+
+```json
+"runners": {
+  "prod": { "ssh": ["ssh", "deploy@prod"], "shell": ["/bin/bash", "-c"] },
+  "ps":   { "shell": ["pwsh", "-NoProfile", "-Command"] }
+},
+"jobs": [
+  { "name": "deploy", "runner": "prod", "steps": [ { "name": "ship", "command": "make release" } ] },
+  { "name": "mixed", "steps": [
+      { "name": "local",  "command": "echo here" },
+      { "name": "remote", "command": "df -h", "runner": "prod" }
+  ]}
+]
+```
+
+- A runner with `ssh` runs the command on that host via your local OpenSSH
+  client (no extra dependency); jobflow single-quotes the command for the remote
+  `shell` (default `/bin/sh -c`), so quoting and operators survive the trip. A
+  runner with only `shell` is a local interpreter override.
+- Resolution is **step `runner` → job `runner` → default (`shell`)**.
+- SSH auth, hosts, and ports come from your `ssh` config / keys / agent —
+  jobflow doesn't handle passwords. Put flags in the `ssh` array
+  (`["ssh", "-p", "2222", "user@host"]`).
+- Runners apply to **command steps only** (handlers run in-process and can't go
+  remote — a runner on a handler step is rejected). Stream redirection still
+  works: remote output comes back into your local `stdout`/`stderr` files.
+- DSL: define with a `runner <name>` block (`ssh …` / `shell …` lines); select
+  with a `runner <name>` line in a job or step.
+
 ### Stream redirection
 
 A command step can redirect its standard streams to files via config, so the
@@ -231,7 +265,8 @@ jobflow to-json pipeline.jobflow > jobs.json   # DSL  -> JSON
 jobflow to-dsl  jobs.json                       # JSON -> DSL (for display)
 ```
 
-Keywords: `shell` / `no-warn` / `job` / `every` | `schedule` / `needs` (job- or
+Keywords: `shell` / `no-warn` / `runner` (top-level block with `ssh`/`shell`,
+or a job/step reference) / `job` / `every` | `schedule` / `needs` (job- or
 step-level deps) / `step` / `parallel` / `run` | `handler` / `stdin` /
 `stdout` | `stdout-append` / `stderr` | `stderr-append` / `retries` /
 `retry-delay` / `timeout` / `continue-on-error`. Lines beginning with `#` are

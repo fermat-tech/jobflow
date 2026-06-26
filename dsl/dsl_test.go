@@ -178,6 +178,40 @@ func TestRedirectionRoundTrips(t *testing.T) {
 	}
 }
 
+func TestRunnersRoundTrip(t *testing.T) {
+	src := "runner prod\n  ssh ssh deploy@prod\n  shell /bin/bash -c\nrunner ps\n  shell pwsh -NoProfile -Command\n\njob deploy\n  runner prod\n  step ship\n    run make release\n  step local\n    run echo hi\n    runner ps\n"
+	doc, err := dsl.ParseDSL(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Runners) != 2 || doc.Runners[0].Name != "prod" {
+		t.Fatalf("runners = %+v", doc.Runners)
+	}
+	if doc.Runners[0].SSH[1] != "deploy@prod" || doc.Runners[0].Shell[0] != "/bin/bash" {
+		t.Fatalf("prod runner parsed wrong: %+v", doc.Runners[0])
+	}
+	if doc.Jobs[0].Runner != "prod" {
+		t.Fatalf("job runner = %q", doc.Jobs[0].Runner)
+	}
+	if doc.Jobs[0].Stages[1].Steps[0].Runner != "ps" {
+		t.Fatalf("step runner = %q", doc.Jobs[0].Stages[1].Steps[0].Runner)
+	}
+	if got := doc.DSL(); got != src {
+		t.Fatalf("runners did not round trip:\n%s", got)
+	}
+
+	// JSON carries the structured runners and references.
+	j, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"runners"`, `"ssh"`, `"runner": "prod"`, `"runner": "ps"`} {
+		if !strings.Contains(string(j), want) {
+			t.Fatalf("JSON missing %s:\n%s", want, j)
+		}
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	bad := map[string]string{
 		"both run and handler":    "job j\n  step s\n    run x\n    handler noop\n",

@@ -36,8 +36,17 @@ type File struct {
 	Shell []string `json:"shell,omitempty"`
 	// NoWarn lists warning codes to silence (or "all"). Optional.
 	NoWarn []string `json:"noWarn,omitempty"`
+	// Runners are named interpreters/remote targets, keyed by name. Optional.
+	Runners map[string]Runner `json:"runners,omitempty"`
 	// Jobs are the job definitions.
 	Jobs []Job `json:"jobs"`
+}
+
+// Runner is a named interpreter or remote SSH target. When SSH is set the
+// command runs remotely; Shell is the (remote or local) interpreter.
+type Runner struct {
+	SSH   []string `json:"ssh,omitempty"`
+	Shell []string `json:"shell,omitempty"`
 }
 
 // Job mirrors engine.Job. Steps holds raw stage entries decoded per-element.
@@ -45,6 +54,7 @@ type Job struct {
 	Name      string            `json:"name"`
 	Schedule  string            `json:"schedule,omitempty"`
 	DependsOn []string          `json:"dependsOn,omitempty"`
+	Runner    string            `json:"runner,omitempty"`
 	Steps     []json.RawMessage `json:"steps"`
 }
 
@@ -54,6 +64,7 @@ type Step struct {
 	DependsOn       []string `json:"dependsOn,omitempty"`
 	Command         string   `json:"command,omitempty"`
 	Handler         string   `json:"handler,omitempty"`
+	Runner          string   `json:"runner,omitempty"`
 	Args            []string `json:"args,omitempty"`
 	Retries         int      `json:"retries,omitempty"`
 	RetryDelay      string   `json:"retryDelay,omitempty"`
@@ -93,6 +104,7 @@ func (f *File) EngineJobs() ([]*engine.Job, error) {
 			Name:      j.Name,
 			Schedule:  j.Schedule,
 			DependsOn: j.DependsOn,
+			Runner:    j.Runner,
 		}
 
 		// First pass: decode each stage entry and detect whether any groups
@@ -144,6 +156,15 @@ func (f *File) EngineJobs() ([]*engine.Job, error) {
 	return out, nil
 }
 
+// EngineRunners converts the config's named runners into engine runners.
+func (f *File) EngineRunners() []engine.Runner {
+	out := make([]engine.Runner, 0, len(f.Runners))
+	for name, r := range f.Runners {
+		out = append(out, engine.Runner{Name: name, SSH: r.SSH, Shell: r.Shell})
+	}
+	return out
+}
+
 // toEngineStep converts a config Step to an engine Step, parsing durations.
 func toEngineStep(jobName string, s Step) (engine.Step, error) {
 	es := engine.Step{
@@ -151,6 +172,7 @@ func toEngineStep(jobName string, s Step) (engine.Step, error) {
 		DependsOn:       s.DependsOn,
 		Command:         s.Command,
 		Handler:         s.Handler,
+		Runner:          s.Runner,
 		Args:            s.Args,
 		Retries:         s.Retries,
 		ContinueOnError: s.ContinueOnError,

@@ -206,6 +206,7 @@ func buildEngine(configPath, statePath string, cliNoWarn []string) (*engine.Engi
 		Store:            engine.NewFileStore(statePath),
 		Shell:            cfg.Shell,
 		SuppressWarnings: append(append([]string(nil), cfg.NoWarn...), cliNoWarn...),
+		Runners:          cfg.EngineRunners(),
 	})
 	registerHandlers(eng)
 	for _, j := range jobs {

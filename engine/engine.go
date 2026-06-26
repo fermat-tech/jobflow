@@ -37,6 +37,9 @@ type Options struct {
 	// SuppressWarnings lists Warning codes to silence (see the Warn* constants).
 	// The special value "all" silences every warning.
 	SuppressWarnings []string
+	// Runners are named interpreters/remote targets referenced by Job.Runner
+	// and Step.Runner. Names must be unique and non-empty.
+	Runners []Runner
 }
 
 // Engine schedules and runs jobs. It is safe for concurrent use; Trigger and
@@ -63,6 +66,8 @@ type Engine struct {
 
 	suppressAllWarn bool
 	suppressedWarn  map[Warning]bool
+
+	runners map[string]*Runner
 }
 
 // New creates an Engine with the given options.
@@ -113,6 +118,13 @@ func New(opts Options) *Engine {
 			e.suppressedWarn[Warning(w)] = true
 		}
 	}
+
+	e.runners = make(map[string]*Runner)
+	for i := range opts.Runners {
+		r := opts.Runners[i]
+		e.runners[r.Name] = &r
+	}
+
 	e.emitStartupWarnings()
 	return e
 }
@@ -139,6 +151,18 @@ func (e *Engine) AddJob(j *Job) error {
 
 	if _, dup := e.jobs[j.Name]; dup {
 		return fmt.Errorf("engine: duplicate job %q", j.Name)
+	}
+	if j.Runner != "" {
+		if _, ok := e.runners[j.Runner]; !ok {
+			return fmt.Errorf("engine: job %q references unknown runner %q", j.Name, j.Runner)
+		}
+	}
+	for _, s := range j.Steps {
+		if s.Runner != "" {
+			if _, ok := e.runners[s.Runner]; !ok {
+				return fmt.Errorf("engine: job %q step %q references unknown runner %q", j.Name, s.Name, s.Runner)
+			}
+		}
 	}
 	if j.Schedule != "" {
 		sched, err := cron.Parse(j.Schedule)
@@ -189,6 +213,9 @@ func validateJob(j *Job) error {
 		}
 		if hasHandler && (s.Stdin != "" || s.Stdout != "" || s.Stderr != "") {
 			return fmt.Errorf("engine: job %q step %q sets stream redirection, which is only supported for command steps", j.Name, s.Name)
+		}
+		if hasHandler && s.Runner != "" {
+			return fmt.Errorf("engine: job %q step %q sets a runner, which is only supported for command steps", j.Name, s.Name)
 		}
 	}
 
@@ -639,6 +666,10 @@ func (e *Engine) executeRun(ctx context.Context, job *Job, trigger Trigger, from
 				state[s.Name] = stRunning
 				running++
 				progressed = true
+				// Command steps inherit the job's runner when they set none.
+				if s.Command != "" && s.Runner == "" {
+					s.Runner = job.Runner
+				}
 				go func(idx int, step Step, base StepRun) {
 					sr := base
 					if err := e.runStep(ctx, &sr, step); err != nil {
@@ -731,11 +762,12 @@ func (e *Engine) execStep(ctx context.Context, step Step) error {
 	return e.runCommand(ctx, step)
 }
 
-// runCommand runs a step's shell command line via the configured shell,
-// applying any per-step stream redirection.
+// runCommand runs a step's command line through its resolved runner (the
+// engine's local shell by default, a custom interpreter, or a remote SSH
+// target), applying any per-step stream redirection.
 func (e *Engine) runCommand(ctx context.Context, step Step) error {
-	args := append(append([]string(nil), e.shell[1:]...), step.Command)
-	cmd := exec.CommandContext(ctx, e.shell[0], args...)
+	name, args := e.commandInvocation(step)
+	cmd := exec.CommandContext(ctx, name, args...)
 
 	if step.Stdin != "" {
 		f, err := os.Open(step.Stdin)
@@ -779,6 +811,17 @@ func (e *Engine) runCommand(ctx context.Context, step Step) error {
 		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil
+}
+
+// commandInvocation resolves the step's runner and builds the exec name+args.
+func (e *Engine) commandInvocation(step Step) (string, []string) {
+	if step.Runner != "" {
+		if r, ok := e.runners[step.Runner]; ok {
+			return r.invocation(step.Command, e.shell)
+		}
+	}
+	def := &Runner{Shell: e.shell}
+	return def.invocation(step.Command, e.shell)
 }
 
 // openRedirect opens path for writing, truncating or appending per appendMode.
