@@ -212,6 +212,26 @@ func TestRunnersRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDescriptionRoundTrips(t *testing.T) {
+	src := "job build\n  description Build and package the app\n  step compile\n    description compile the sources\n    run make\n"
+	doc, err := dsl.ParseDSL(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Jobs[0].Description != "Build and package the app" {
+		t.Fatalf("job description = %q", doc.Jobs[0].Description)
+	}
+	if doc.Jobs[0].Stages[0].Steps[0].Description != "compile the sources" {
+		t.Fatalf("step description = %q", doc.Jobs[0].Stages[0].Steps[0].Description)
+	}
+	if got := doc.DSL(); got != src {
+		t.Fatalf("description did not round trip:\n%s", got)
+	}
+	if j, _ := doc.JSON(); !strings.Contains(string(j), `"description": "Build and package the app"`) {
+		t.Fatalf("JSON missing job description:\n%s", j)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	bad := map[string]string{
 		"both run and handler":    "job j\n  step s\n    run x\n    handler noop\n",

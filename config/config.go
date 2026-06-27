@@ -51,16 +51,18 @@ type Runner struct {
 
 // Job mirrors engine.Job. Steps holds raw stage entries decoded per-element.
 type Job struct {
-	Name      string            `json:"name"`
-	Schedule  string            `json:"schedule,omitempty"`
-	DependsOn []string          `json:"dependsOn,omitempty"`
-	Runner    string            `json:"runner,omitempty"`
-	Steps     []json.RawMessage `json:"steps"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Schedule    string            `json:"schedule,omitempty"`
+	DependsOn   []string          `json:"dependsOn,omitempty"`
+	Runner      string            `json:"runner,omitempty"`
+	Steps       []json.RawMessage `json:"steps"`
 }
 
 // Step mirrors engine.Step but takes durations as strings.
 type Step struct {
 	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
 	DependsOn       []string `json:"dependsOn,omitempty"`
 	Command         string   `json:"command,omitempty"`
 	Handler         string   `json:"handler,omitempty"`
@@ -101,10 +103,11 @@ func (f *File) EngineJobs() ([]*engine.Job, error) {
 	out := make([]*engine.Job, 0, len(f.Jobs))
 	for _, j := range f.Jobs {
 		ej := &engine.Job{
-			Name:      j.Name,
-			Schedule:  j.Schedule,
-			DependsOn: j.DependsOn,
-			Runner:    j.Runner,
+			Name:        j.Name,
+			Description: j.Description,
+			Schedule:    j.Schedule,
+			DependsOn:   j.DependsOn,
+			Runner:      j.Runner,
 		}
 
 		// First pass: decode each stage entry and detect whether any groups
@@ -169,6 +172,7 @@ func (f *File) EngineRunners() []engine.Runner {
 func toEngineStep(jobName string, s Step) (engine.Step, error) {
 	es := engine.Step{
 		Name:            s.Name,
+		Description:     s.Description,
 		DependsOn:       s.DependsOn,
 		Command:         s.Command,
 		Handler:         s.Handler,

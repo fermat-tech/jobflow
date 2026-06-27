@@ -21,9 +21,10 @@ go test ./...                 # tests
   - `command` — a shell command line (run via `cmd /C` on Windows,
     `/bin/sh -c` elsewhere; override with the config's `shell`).
   - `handler` — a named Go function registered with the engine.
-  Per-step options: `dependsOn` (other steps in the same job), `retries`,
-  `retryDelay`, `timeout`, `continueOnError`, `runner` (interpreter / remote
-  target, see below), and stream redirection (`stdin`/`stdout`/`stderr`).
+  Per-step options: `description` (free-form docs), `dependsOn` (other steps in
+  the same job), `retries`, `retryDelay`, `timeout`, `continueOnError`, `runner`
+  (interpreter / remote target, see below), and stream redirection
+  (`stdin`/`stdout`/`stderr`). Jobs also take an optional `description`.
 - **Run** — one execution of a job, recording each step's status, attempt
   count, and error. The latest run per job is persisted to disk.
 
@@ -298,8 +299,9 @@ jobflow to-dsl  jobs.json                       # JSON -> DSL (for display)
 ```
 
 Keywords: `shell` / `no-warn` / `runner` (top-level block with `ssh`/`shell`,
-or a job/step reference) / `job` / `every` | `schedule` / `needs` (job- or
-step-level deps) / `step` / `parallel` / `run` | `handler` / `stdin` /
+or a job/step reference) / `job` / `description` / `every` | `schedule` /
+`needs` (job- or step-level deps) / `step` / `parallel` / `run` | `handler` /
+`stdin` /
 `stdout` | `stdout-append` / `stderr` | `stderr-append` / `retries` /
 `retry-delay` / `timeout` / `continue-on-error`. Lines beginning with `#` are
 comments. JSON↔DSL round-trips preserve structure exactly; comments are not

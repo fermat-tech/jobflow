@@ -38,6 +38,9 @@ type Step struct {
 	// for restart-from-step.
 	Name string `json:"name"`
 
+	// Description is optional free-form documentation of the step's purpose.
+	Description string `json:"description,omitempty"`
+
 	// DependsOn lists other steps in the same job that must complete before
 	// this step runs. If ANY step in a job sets DependsOn, the job runs as a
 	// DAG: steps with no declared deps start immediately (in parallel) and
@@ -93,6 +96,9 @@ type Step struct {
 type Job struct {
 	// Name uniquely identifies the job in the engine.
 	Name string `json:"name"`
+
+	// Description is optional free-form documentation of the job's purpose.
+	Description string `json:"description,omitempty"`
 
 	// Schedule is an optional cron expression. When empty, the job only runs
 	// when triggered manually or by dependency cascade.

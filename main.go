@@ -379,17 +379,18 @@ func printJobNames(w io.Writer, eng *engine.Engine) {
 // printJobsJSON writes the job list as a JSON array — for scripting.
 func printJobsJSON(w io.Writer, eng *engine.Engine) error {
 	type jobJSON struct {
-		Name       string   `json:"name"`
-		Schedule   string   `json:"schedule,omitempty"`
-		DependsOn  []string `json:"dependsOn,omitempty"`
-		Runner     string   `json:"runner,omitempty"`
-		Running    bool     `json:"running"`
-		LastStatus string   `json:"lastStatus,omitempty"`
-		NextRun    string   `json:"nextRun,omitempty"`
+		Name        string   `json:"name"`
+		Description string   `json:"description,omitempty"`
+		Schedule    string   `json:"schedule,omitempty"`
+		DependsOn   []string `json:"dependsOn,omitempty"`
+		Runner      string   `json:"runner,omitempty"`
+		Running     bool     `json:"running"`
+		LastStatus  string   `json:"lastStatus,omitempty"`
+		NextRun     string   `json:"nextRun,omitempty"`
 	}
 	out := make([]jobJSON, 0, len(eng.Snapshot()))
 	for _, s := range eng.Snapshot() {
-		j := jobJSON{Name: s.Name, Schedule: s.Schedule, DependsOn: s.DependsOn, Runner: s.Runner, Running: s.Running}
+		j := jobJSON{Name: s.Name, Description: s.Description, Schedule: s.Schedule, DependsOn: s.DependsOn, Runner: s.Runner, Running: s.Running}
 		if s.Latest != nil {
 			j.LastStatus = string(s.Latest.Status)
 		}

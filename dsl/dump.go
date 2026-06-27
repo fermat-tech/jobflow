@@ -42,6 +42,9 @@ func (d *Document) DSL() string {
 
 func writeJob(b *strings.Builder, job Job) {
 	b.WriteString("job " + job.Name + "\n")
+	if job.Description != "" {
+		b.WriteString("  description " + job.Description + "\n")
+	}
 	if job.Schedule != "" {
 		if dur, ok := strings.CutPrefix(job.Schedule, "@every "); ok {
 			b.WriteString("  every " + dur + "\n")
@@ -70,6 +73,9 @@ func writeJob(b *strings.Builder, job Job) {
 func writeStep(b *strings.Builder, s Step, indent string) {
 	body := indent + "  "
 	b.WriteString(indent + "step " + s.Name + "\n")
+	if s.Description != "" {
+		b.WriteString(body + "description " + s.Description + "\n")
+	}
 	if s.Command != "" {
 		b.WriteString(body + "run " + s.Command + "\n")
 	} else {

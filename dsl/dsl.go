@@ -45,11 +45,12 @@ type Runner struct {
 
 // Job is a named, optionally scheduled unit composed of ordered stages.
 type Job struct {
-	Name     string
-	Schedule string   // cron spec, e.g. "@every 1m" or "0 2 * * *"; empty if none
-	Needs    []string // job-level dependencies
-	Runner   string   // default runner name for command steps; empty = local
-	Stages   []Stage
+	Name        string
+	Description string   // optional free-form documentation
+	Schedule    string   // cron spec, e.g. "@every 1m" or "0 2 * * *"; empty if none
+	Needs       []string // job-level dependencies
+	Runner      string   // default runner name for command steps; empty = local
+	Stages      []Stage
 }
 
 // Stage is one position in a job's ordered step list: either a single step or a
@@ -62,6 +63,7 @@ type Stage struct {
 // Step is a single unit of work. Exactly one of Command or Handler is set.
 type Step struct {
 	Name            string
+	Description     string   // optional free-form documentation
 	Needs           []string // step-level dependencies (advanced DAGs)
 	Command         string
 	Handler         string
@@ -82,6 +84,7 @@ type Step struct {
 
 type jStep struct {
 	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
 	DependsOn       []string `json:"dependsOn,omitempty"`
 	Command         string   `json:"command,omitempty"`
 	Handler         string   `json:"handler,omitempty"`
@@ -108,11 +111,12 @@ type jRunner struct {
 }
 
 type jJob struct {
-	Name      string   `json:"name"`
-	Schedule  string   `json:"schedule,omitempty"`
-	DependsOn []string `json:"dependsOn,omitempty"`
-	Runner    string   `json:"runner,omitempty"`
-	Steps     []any    `json:"steps"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Schedule    string   `json:"schedule,omitempty"`
+	DependsOn   []string `json:"dependsOn,omitempty"`
+	Runner      string   `json:"runner,omitempty"`
+	Steps       []any    `json:"steps"`
 }
 
 type jFile struct {
@@ -125,6 +129,7 @@ type jFile struct {
 func (s Step) toJSON() jStep {
 	return jStep{
 		Name:            s.Name,
+		Description:     s.Description,
 		DependsOn:       s.Needs,
 		Command:         s.Command,
 		Handler:         s.Handler,
@@ -145,6 +150,7 @@ func (s Step) toJSON() jStep {
 func stepFromJSON(j jStep) Step {
 	return Step{
 		Name:            j.Name,
+		Description:     j.Description,
 		Needs:           j.DependsOn,
 		Command:         j.Command,
 		Handler:         j.Handler,
@@ -176,7 +182,7 @@ func (d *Document) JSON() ([]byte, error) {
 		}
 	}
 	for _, job := range d.Jobs {
-		jj := jJob{Name: job.Name, Schedule: job.Schedule, DependsOn: job.Needs, Runner: job.Runner}
+		jj := jJob{Name: job.Name, Description: job.Description, Schedule: job.Schedule, DependsOn: job.Needs, Runner: job.Runner}
 		for _, st := range job.Stages {
 			if st.Parallel {
 				grp := jParallel{}
@@ -204,11 +210,12 @@ func FromJSON(data []byte) (*Document, error) {
 		NoWarn  []string           `json:"noWarn"`
 		Runners map[string]jRunner `json:"runners"`
 		Jobs    []struct {
-			Name      string            `json:"name"`
-			Schedule  string            `json:"schedule"`
-			DependsOn []string          `json:"dependsOn"`
-			Runner    string            `json:"runner"`
-			Steps     []json.RawMessage `json:"steps"`
+			Name        string            `json:"name"`
+			Description string            `json:"description"`
+			Schedule    string            `json:"schedule"`
+			DependsOn   []string          `json:"dependsOn"`
+			Runner      string            `json:"runner"`
+			Steps       []json.RawMessage `json:"steps"`
 		} `json:"jobs"`
 	}
 	if err := json.Unmarshal(data, &in); err != nil {
@@ -221,7 +228,7 @@ func FromJSON(data []byte) (*Document, error) {
 		doc.Runners = append(doc.Runners, Runner{Name: name, SSH: r.SSH, Shell: r.Shell})
 	}
 	for _, j := range in.Jobs {
-		job := Job{Name: j.Name, Schedule: j.Schedule, Needs: j.DependsOn, Runner: j.Runner}
+		job := Job{Name: j.Name, Description: j.Description, Schedule: j.Schedule, Needs: j.DependsOn, Runner: j.Runner}
 		for i, raw := range j.Steps {
 			var probe struct {
 				Parallel []jStep `json:"parallel"`

@@ -25,10 +25,12 @@ type node struct {
 //	  ssh <args...>                  (remote: local ssh invocation)
 //	  shell <args...>                (the interpreter)
 //	job <name>
+//	  description <text>             (optional, free-form)
 //	  every <dur> | schedule <spec>  (optional)
 //	  needs <job>, <job>             (optional, job-level deps)
 //	  runner <name>                  (optional, default runner for the job)
 //	  step <name>                    (a single-step stage)
+//	    description <text>           (optional, free-form)
 //	    run <command...>             (OR) handler <name> [args...]
 //	    runner <name>                (optional, command steps only)
 //	    stdin <path>                 (command steps only)
@@ -93,6 +95,8 @@ func parseJob(n *node, rest string) (*Job, error) {
 	for _, c := range n.children {
 		kw, r := keyword(c.text)
 		switch kw {
+		case "description":
+			job.Description = r
 		case "every":
 			if r == "" {
 				return nil, lineErr(c, "'every' requires a duration")
@@ -174,6 +178,8 @@ func parseStep(n *node, rest string) (*Step, error) {
 	for _, c := range n.children {
 		kw, r := keyword(c.text)
 		switch kw {
+		case "description":
+			s.Description = r
 		case "run":
 			if r == "" {
 				return nil, lineErr(c, "'run' requires a command")

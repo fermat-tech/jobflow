@@ -253,13 +253,14 @@ func (e *Engine) Job(name string) (*Job, bool) {
 
 // JobStatus is a snapshot of a job for reporting.
 type JobStatus struct {
-	Name      string
-	Schedule  string
-	DependsOn []string
-	Runner    string
-	NextFire  time.Time // zero if unscheduled
-	Running   bool
-	Latest    *Run // nil if never run
+	Name        string
+	Description string
+	Schedule    string
+	DependsOn   []string
+	Runner      string
+	NextFire    time.Time // zero if unscheduled
+	Running     bool
+	Latest      *Run // nil if never run
 }
 
 // Latest returns a copy of the most recent run for a job, if any.
@@ -278,13 +279,14 @@ func (e *Engine) Snapshot() []JobStatus {
 	for _, name := range e.order {
 		j := e.jobs[name]
 		st := JobStatus{
-			Name:      j.Name,
-			Schedule:  j.Schedule,
-			DependsOn: append([]string(nil), j.DependsOn...),
-			Runner:    j.Runner,
-			NextFire:  e.nextFire[name],
-			Running:   e.running[name],
-			Latest:    cloneRun(e.latest[name]),
+			Name:        j.Name,
+			Description: j.Description,
+			Schedule:    j.Schedule,
+			DependsOn:   append([]string(nil), j.DependsOn...),
+			Runner:      j.Runner,
+			NextFire:    e.nextFire[name],
+			Running:     e.running[name],
+			Latest:      cloneRun(e.latest[name]),
 		}
 		out = append(out, st)
 	}
