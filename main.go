@@ -8,9 +8,11 @@
 // Commands:
 //
 //	serve                 run the scheduler loop (Ctrl-C to stop)
-//	list                  list jobs with schedule, deps, and last status
+//	list [--names|--json] list jobs; --names/--json for scripting
 //	status [job]          show detailed run status (all jobs, or one)
 //	trigger <job>         run a job once now (ignores dependency gating)
+//	trigger --all         run every job ([--ordered] honors dependency order)
+//	run-all               same as "trigger --all"
 //	restart <job> [step]  re-run a job, optionally from a step name or 1-based index
 //	validate              load the config and report any errors
 //	handlers              list built-in Go step handlers
@@ -26,6 +28,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -157,7 +160,7 @@ func run(argv []string) error {
 	case "help":
 		usage()
 		return nil
-	case "serve", "list", "status", "trigger", "restart", "validate":
+	case "serve", "list", "status", "trigger", "restart", "validate", "run-all":
 		eng, err := buildEngine(configPath, statePath, noWarn)
 		if err != nil {
 			return err
@@ -166,7 +169,14 @@ func run(argv []string) error {
 		case "validate":
 			fmt.Printf("ok: %d job(s) loaded from %s\n", len(eng.Snapshot()), configPath)
 		case "list":
-			printList(eng)
+			switch {
+			case hasFlag(args, "names"):
+				printJobNames(os.Stdout, eng)
+			case hasFlag(args, "json"):
+				return printJobsJSON(os.Stdout, eng)
+			default:
+				printList(eng)
+			}
 		case "status":
 			var job string
 			if len(args) > 0 {
@@ -174,10 +184,16 @@ func run(argv []string) error {
 			}
 			return printStatus(eng, job)
 		case "trigger":
-			if len(args) < 1 {
-				return errors.New("trigger needs a job name")
+			if hasFlag(args, "all") {
+				return doRunAll(eng, hasFlag(args, "ordered"))
 			}
-			return doTrigger(eng, args[0])
+			name := firstNonFlag(args)
+			if name == "" {
+				return errors.New("trigger needs a job name (or --all)")
+			}
+			return doTrigger(eng, name)
+		case "run-all":
+			return doRunAll(eng, hasFlag(args, "ordered"))
 		case "restart":
 			if len(args) < 1 {
 				return errors.New("restart needs a job name")
@@ -301,6 +317,95 @@ func doRestart(eng *engine.Engine, job, from string) error {
 	return nil
 }
 
+// hasFlag reports whether args contains the dashed flag named name (matching
+// both "-name" and "--name").
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") && strings.TrimLeft(a, "-") == name {
+			return true
+		}
+	}
+	return false
+}
+
+// firstNonFlag returns the first argument that is not a dashed flag.
+func firstNonFlag(args []string) string {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return ""
+}
+
+// doRunAll runs every job once (optionally honoring dependency order) and
+// prints a per-job summary. Returns an error if any job failed.
+func doRunAll(eng *engine.Engine, ordered bool) error {
+	results := eng.RunAll(context.Background(), ordered)
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "JOB\tSTATUS\tDETAIL")
+	failed := 0
+	for _, s := range eng.Snapshot() {
+		status, detail := "-", ""
+		if r := results[s.Name]; r != nil {
+			status = string(r.Status)
+			detail = r.Note
+			if r.Status == engine.StatusFailed {
+				failed++
+				for _, st := range r.Steps {
+					if st.Status == engine.StatusFailed {
+						detail = "step " + st.Name + ": " + st.Error
+						break
+					}
+				}
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, status, detail)
+	}
+	tw.Flush()
+	if failed > 0 {
+		return fmt.Errorf("%d job(s) failed", failed)
+	}
+	return nil
+}
+
+// printJobNames writes one job name per line — for scripting.
+func printJobNames(w io.Writer, eng *engine.Engine) {
+	for _, s := range eng.Snapshot() {
+		fmt.Fprintln(w, s.Name)
+	}
+}
+
+// printJobsJSON writes the job list as a JSON array — for scripting.
+func printJobsJSON(w io.Writer, eng *engine.Engine) error {
+	type jobJSON struct {
+		Name       string   `json:"name"`
+		Schedule   string   `json:"schedule,omitempty"`
+		DependsOn  []string `json:"dependsOn,omitempty"`
+		Runner     string   `json:"runner,omitempty"`
+		Running    bool     `json:"running"`
+		LastStatus string   `json:"lastStatus,omitempty"`
+		NextRun    string   `json:"nextRun,omitempty"`
+	}
+	out := make([]jobJSON, 0, len(eng.Snapshot()))
+	for _, s := range eng.Snapshot() {
+		j := jobJSON{Name: s.Name, Schedule: s.Schedule, DependsOn: s.DependsOn, Runner: s.Runner, Running: s.Running}
+		if s.Latest != nil {
+			j.LastStatus = string(s.Latest.Status)
+		}
+		if !s.NextFire.IsZero() {
+			j.NextRun = s.NextFire.Format(time.RFC3339)
+		}
+		out = append(out, j)
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, string(b))
+	return nil
+}
+
 func printList(eng *engine.Engine) {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "JOB\tSCHEDULE\tDEPENDS ON\tLAST STATUS")
@@ -390,9 +495,11 @@ Usage:
 
 Commands:
   serve                  run the scheduling loop until Ctrl-C
-  list                   list jobs (schedule, dependencies, last status)
+  list [--names|--json]  list jobs; --names/--json for scripting
   status [job]           show detailed run/step status from persisted state
   trigger <job>          run a job once now (bypasses dependency gating)
+  trigger --all [--ordered]  run every job (--ordered honors dependency order)
+  run-all [--ordered]    same as 'trigger --all'
   restart <job> [step]   re-run a job from the top, or from a step name/1-based index
   validate               load config and report any errors
   handlers               list built-in Go step handlers

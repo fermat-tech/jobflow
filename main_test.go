@@ -7,7 +7,61 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fermat-tech/jobflow/engine"
 )
+
+func TestHasFlagAndFirstNonFlag(t *testing.T) {
+	args := []string{"--all", "jobA", "-ordered"}
+	if !hasFlag(args, "all") {
+		t.Error("--all not detected")
+	}
+	if !hasFlag(args, "ordered") {
+		t.Error("-ordered not detected")
+	}
+	if hasFlag(args, "json") {
+		t.Error("json should be absent")
+	}
+	if got := firstNonFlag(args); got != "jobA" {
+		t.Errorf("firstNonFlag = %q, want jobA", got)
+	}
+	if firstNonFlag([]string{"--all"}) != "" {
+		t.Error("firstNonFlag of only-flags should be empty")
+	}
+}
+
+func newJobEngine(t *testing.T) *engine.Engine {
+	t.Helper()
+	eng := engine.New(engine.Options{Store: engine.NewMemoryStore()})
+	for _, n := range []string{"alpha", "beta"} {
+		if err := eng.AddJob(&engine.Job{Name: n, Steps: []engine.Step{{Name: "s", Command: "echo"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return eng
+}
+
+func TestPrintJobNames(t *testing.T) {
+	var buf bytes.Buffer
+	printJobNames(&buf, newJobEngine(t))
+	if got := buf.String(); got != "alpha\nbeta\n" {
+		t.Fatalf("names = %q", got)
+	}
+}
+
+func TestPrintJobsJSON(t *testing.T) {
+	var buf bytes.Buffer
+	if err := printJobsJSON(&buf, newJobEngine(t)); err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+	}
+	if len(got) != 2 || got[0]["name"] != "alpha" {
+		t.Fatalf("json = %s", buf.String())
+	}
+}
 
 const dslSample = `job ci
   every 1m

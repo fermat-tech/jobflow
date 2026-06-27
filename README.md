@@ -91,15 +91,17 @@ untouched.
 ```
 jobflow [-config FILE] [-state FILE] <command> [args]
 
-serve                  run the scheduling loop until Ctrl-C
-list                   list jobs (schedule, dependencies, last status)
-status [job]           detailed run/step status from persisted state
-trigger <job>          run a job once now (bypasses dependency gating)
-restart <job> [step]   re-run from the top, or from a step name / 1-based index
-validate               load config and report any errors
-handlers               list built-in Go step handlers
-to-json [file]         transpile DSL to JSON config (stdin/stdout)
-to-dsl  [file]         render JSON config as DSL (stdin/stdout)
+serve                      run the scheduling loop until Ctrl-C
+list [--names|--json]      list jobs; --names/--json for scripting
+status [job]               detailed run/step status from persisted state
+trigger <job>              run a job once now (bypasses dependency gating)
+trigger --all [--ordered]  run every job; --ordered honors dependency order
+run-all [--ordered]        same as 'trigger --all'
+restart <job> [step]       re-run from the top, or from a step name / 1-based index
+validate                   load config and report any errors
+handlers                   list built-in Go step handlers
+to-json [file]             transpile DSL to JSON config (stdin/stdout)
+to-dsl  [file]             render JSON config as DSL (stdin/stdout)
 
 -config FILE   jobs config       (default "jobflow.json")
 -state  FILE   persisted state    (default "jobflow-state.json")
@@ -114,7 +116,15 @@ jobflow -config examples/jobs.json list
 jobflow -config examples/jobs.json trigger deploy
 jobflow -config examples/jobs.json restart deploy smoke   # resume from the "smoke" step
 jobflow -config examples/jobs.json restart deploy 2       # resume from step #2
+jobflow -config examples/jobs.json run-all --ordered      # run every job, deps first
+jobflow -config examples/jobs.json list --names | % { jobflow trigger $_ }  # script over jobs
 ```
+
+`run-all` (and `trigger --all`) run every job once on demand — handy when a
+config has no cron schedules. Without `--ordered`, all jobs fire immediately
+(dependency gating bypassed, like `trigger`); with `--ordered`, a job waits for
+its `dependsOn` jobs to succeed first and is skipped if any of them fails — a
+one-shot of the scheduler's cascade. It exits non-zero if any job fails.
 
 ### Cron syntax
 

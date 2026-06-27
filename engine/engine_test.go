@@ -352,6 +352,79 @@ func readTrim(t *testing.T, path string) string {
 	return strings.TrimSpace(string(b))
 }
 
+func TestRunAllOrdered(t *testing.T) {
+	eng := newTestEngine(t)
+	var mu sync.Mutex
+	var order []string
+	mk := func(name string) HandlerFunc {
+		return func(ctx context.Context, s Step) error {
+			mu.Lock()
+			order = append(order, name)
+			mu.Unlock()
+			return nil
+		}
+	}
+	eng.Register("ha", mk("a"))
+	eng.Register("hb", mk("b"))
+	eng.Register("hc", mk("c"))
+	mustAdd(t, eng, &Job{Name: "a", Steps: []Step{{Name: "s", Handler: "ha"}}})
+	mustAdd(t, eng, &Job{Name: "b", Steps: []Step{{Name: "s", Handler: "hb"}}})
+	mustAdd(t, eng, &Job{Name: "c", DependsOn: []string{"a", "b"}, Steps: []Step{{Name: "s", Handler: "hc"}}})
+
+	res := eng.RunAll(context.Background(), true)
+	for _, n := range []string{"a", "b", "c"} {
+		if res[n] == nil || res[n].Status != StatusSucceeded {
+			t.Fatalf("job %q result = %+v", n, res[n])
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	pos := map[string]int{}
+	for i, n := range order {
+		pos[n] = i
+	}
+	if pos["c"] < pos["a"] || pos["c"] < pos["b"] {
+		t.Fatalf("c must run after a and b: %v", order)
+	}
+}
+
+func TestRunAllOrderedBlocksFailedDep(t *testing.T) {
+	eng := newTestEngine(t)
+	eng.Register("ok", func(ctx context.Context, s Step) error { return nil })
+	eng.Register("boom", func(ctx context.Context, s Step) error { return io.ErrUnexpectedEOF })
+	mustAdd(t, eng, &Job{Name: "a", Steps: []Step{{Name: "s", Handler: "boom"}}})
+	mustAdd(t, eng, &Job{Name: "b", Steps: []Step{{Name: "s", Handler: "ok"}}})
+	mustAdd(t, eng, &Job{Name: "c", DependsOn: []string{"a"}, Steps: []Step{{Name: "s", Handler: "ok"}}})
+
+	res := eng.RunAll(context.Background(), true)
+	if res["a"].Status != StatusFailed {
+		t.Fatalf("a = %s, want failed", res["a"].Status)
+	}
+	if res["b"].Status != StatusSucceeded {
+		t.Fatalf("b = %s, want succeeded", res["b"].Status)
+	}
+	if res["c"].Status != StatusSkipped {
+		t.Fatalf("c = %s, want skipped (dep failed)", res["c"].Status)
+	}
+}
+
+func TestRunAllUnordered(t *testing.T) {
+	// c depends on a, but unordered runs every job regardless of gating.
+	eng := newTestEngine(t)
+	var ran int32
+	eng.Register("h", func(ctx context.Context, s Step) error { atomic.AddInt32(&ran, 1); return nil })
+	mustAdd(t, eng, &Job{Name: "a", Steps: []Step{{Name: "s", Handler: "h"}}})
+	mustAdd(t, eng, &Job{Name: "c", DependsOn: []string{"a"}, Steps: []Step{{Name: "s", Handler: "h"}}})
+
+	res := eng.RunAll(context.Background(), false)
+	if res["a"] == nil || res["c"] == nil {
+		t.Fatalf("both jobs should have run: %+v", res)
+	}
+	if atomic.LoadInt32(&ran) != 2 {
+		t.Fatalf("ran %d steps, want 2", ran)
+	}
+}
+
 func TestRunnerInvocation(t *testing.T) {
 	localDefault := []string{"/bin/sh", "-c"}
 	cases := []struct {

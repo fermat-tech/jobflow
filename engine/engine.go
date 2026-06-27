@@ -256,6 +256,7 @@ type JobStatus struct {
 	Name      string
 	Schedule  string
 	DependsOn []string
+	Runner    string
 	NextFire  time.Time // zero if unscheduled
 	Running   bool
 	Latest    *Run // nil if never run
@@ -280,6 +281,7 @@ func (e *Engine) Snapshot() []JobStatus {
 			Name:      j.Name,
 			Schedule:  j.Schedule,
 			DependsOn: append([]string(nil), j.DependsOn...),
+			Runner:    j.Runner,
 			NextFire:  e.nextFire[name],
 			Running:   e.running[name],
 			Latest:    cloneRun(e.latest[name]),
@@ -839,8 +841,9 @@ func openRedirect(path string, appendMode bool) (*os.File, error) {
 	return f, nil
 }
 
-// recordSkip persists a skipped run for a job whose dependencies were not met.
-func (e *Engine) recordSkip(job *Job, trigger Trigger, note string) {
+// recordSkip persists a skipped run for a job whose dependencies were not met
+// and returns it.
+func (e *Engine) recordSkip(job *Job, trigger Trigger, note string) *Run {
 	now := e.now()
 	run := &Run{
 		JobName:    job.Name,
@@ -854,6 +857,7 @@ func (e *Engine) recordSkip(job *Job, trigger Trigger, note string) {
 	}
 	e.logf("job %q skipped: %s", job.Name, note)
 	e.persist(run)
+	return run
 }
 
 // persist updates the in-memory latest run and writes it to the store.
