@@ -134,6 +134,11 @@ func (f *File) EngineJobs() ([]*engine.Job, error) {
 			stages = append(stages, stage{steps: []Step{s}})
 		}
 
+		// When the job uses parallel groups, the stage deps below are the
+		// authoritative DAG — tell the engine so it does not fall back to
+		// sequential ordering when a leading group leaves its steps dep-free.
+		ej.ExplicitSteps = hasGroup
+
 		// Second pass: lower stages to engine steps. When any group exists,
 		// each stage depends on every step of the prior stage (preserving
 		// order); otherwise steps pass through (sequential by engine default).

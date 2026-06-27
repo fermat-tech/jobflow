@@ -7,12 +7,13 @@ func EffectiveStepDeps(job *Job) map[string][]string { return effectiveStepDeps(
 
 // effectiveStepDeps returns the dependency list per step name for a job.
 //
-// If any step declares DependsOn, the job is in explicit DAG mode and each
-// step's declared deps are used verbatim (steps with none start immediately).
-// Otherwise linear deps are synthesized — step i depends on step i-1 — which
-// reproduces sequential execution through the same DAG executor.
+// If the job sets ExplicitSteps or any step declares DependsOn, the job is in
+// explicit DAG mode and each step's declared deps are used verbatim (steps with
+// none start immediately, in parallel). Otherwise linear deps are synthesized —
+// step i depends on step i-1 — which reproduces sequential execution through the
+// same DAG executor.
 func effectiveStepDeps(job *Job) map[string][]string {
-	explicit := false
+	explicit := job.ExplicitSteps
 	for _, s := range job.Steps {
 		if len(s.DependsOn) > 0 {
 			explicit = true

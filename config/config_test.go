@@ -88,6 +88,35 @@ func TestParallelGroupLowering(t *testing.T) {
 	}
 }
 
+func TestLeadingParallelGroupIsExplicit(t *testing.T) {
+	// A job whose only stage is a parallel group must mark ExplicitSteps so the
+	// engine runs the dep-free steps in parallel instead of serializing them.
+	doc := `{"jobs":[{"name":"j","steps":[
+		{"parallel":[{"name":"a","command":"x"},{"name":"b","command":"x"}]}
+	]}]}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "j.json")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := f.EngineJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !jobs[0].ExplicitSteps {
+		t.Fatal("a job with a parallel group must set ExplicitSteps")
+	}
+	for _, s := range jobs[0].Steps {
+		if len(s.DependsOn) != 0 {
+			t.Fatalf("leading parallel step %q should have no deps, got %v", s.Name, s.DependsOn)
+		}
+	}
+}
+
 func TestSequentialNoGroupsHasNoDeps(t *testing.T) {
 	doc := `{"jobs":[{"name":"s","steps":[
 		{"name":"a","command":"x"},

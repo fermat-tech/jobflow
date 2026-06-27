@@ -113,6 +113,13 @@ type Job struct {
 	// engine's local shell.
 	Runner string `json:"runner,omitempty"`
 
+	// ExplicitSteps makes the steps' DependsOn the authoritative intra-job DAG:
+	// no sequential ordering is synthesized, so steps with no deps run as
+	// parallel roots even when they are the only steps. Config sets this when a
+	// job uses parallel groups. When false (default), the engine runs steps
+	// sequentially unless some step declares DependsOn.
+	ExplicitSteps bool `json:"explicitSteps,omitempty"`
+
 	// Steps are executed in order.
 	Steps []Step `json:"steps"`
 

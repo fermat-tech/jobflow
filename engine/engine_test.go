@@ -575,6 +575,40 @@ func TestUnknownDependencyRejected(t *testing.T) {
 	}
 }
 
+// TestExplicitStepsRunDeplessRootsInParallel covers the case a config produces
+// for a job whose only stage is a parallel group: steps with no deps must run
+// concurrently because ExplicitSteps is set. Without the fix these serialize
+// (the engine would synthesize linear deps) and the barrier times out.
+func TestExplicitStepsRunDeplessRootsInParallel(t *testing.T) {
+	eng := newTestEngine(t)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	eng.Register("barrier", func(ctx context.Context, s Step) error {
+		wg.Done()
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+		select {
+		case <-done:
+			return nil
+		case <-time.After(2 * time.Second):
+			return fmt.Errorf("step %q never saw its peer — steps were serialized", s.Name)
+		}
+	})
+	if err := eng.AddJob(&Job{Name: "j", ExplicitSteps: true, Steps: []Step{
+		{Name: "a", Handler: "barrier"},
+		{Name: "b", Handler: "barrier"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := eng.Trigger(context.Background(), "j")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != StatusSucceeded {
+		t.Fatalf("status = %s; dep-free steps under ExplicitSteps did not run in parallel", run.Status)
+	}
+}
+
 // TestParallelStepsRunConcurrently proves that two steps sharing a single
 // upstream dependency actually overlap: each waits on a barrier that only
 // releases once both have started. Sequential execution would deadlock and the
