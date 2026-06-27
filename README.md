@@ -99,6 +99,7 @@ trigger <job>              run a job once now (bypasses dependency gating)
 trigger --all [--ordered]  run every job; --ordered honors dependency order
 run-all [--ordered]        same as 'trigger --all'
 restart <job> [step]       re-run from the top, or from a step name / 1-based index
+dag [--steps]              render the dependency DAG as SVG (stdout)
 validate                   load config and report any errors
 handlers                   list built-in Go step handlers
 to-json [file]             transpile DSL to JSON config (stdin/stdout)
@@ -126,6 +127,21 @@ config has no cron schedules. Without `--ordered`, all jobs fire immediately
 (dependency gating bypassed, like `trigger`); with `--ordered`, a job waits for
 its `dependsOn` jobs to succeed first and is skipped if any of them fails — a
 one-shot of the scheduler's cascade. It exits non-zero if any job fails.
+
+### Visualize the DAG
+
+`dag` renders the job dependency graph as a standalone SVG (no graphviz
+needed) — jobs as nodes, `dependsOn` as arrows, with schedule/`description` as
+subtext. `--steps` expands each job into a cluster showing its internal step
+DAG. Output goes to stdout:
+
+```powershell
+jobflow -config jobs.json dag > graph.svg
+jobflow -config jobs.json dag --steps > graph.svg
+```
+
+The same rendering is available as a library via package `dagsvg`
+(`Render(jobs, Options{Steps: true})`).
 
 ### Cron syntax
 
@@ -353,7 +369,8 @@ engine/      Engine, jobs/steps/runs, registry, store, DAG validation
 cron/        dependency-free cron parser + Next()
 config/      JSON config -> engine jobs
 dsl/         indentation DSL <-> JSON config
+dagsvg/      render the dependency DAG as SVG
 examples/    sample configs (.json and .jobflow)
 ```
 
-Import paths: `github.com/fermat-tech/jobflow/{engine,cron,config,dsl}`.
+Import paths: `github.com/fermat-tech/jobflow/{engine,cron,config,dsl,dagsvg}`.

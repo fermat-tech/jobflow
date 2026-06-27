@@ -1,5 +1,10 @@
 package engine
 
+// EffectiveStepDeps returns each step's effective dependencies for a job: the
+// declared step DependsOn when any step uses them, or synthesized linear
+// (sequential) dependencies otherwise. Useful for visualizing the step DAG.
+func EffectiveStepDeps(job *Job) map[string][]string { return effectiveStepDeps(job) }
+
 // effectiveStepDeps returns the dependency list per step name for a job.
 //
 // If any step declares DependsOn, the job is in explicit DAG mode and each

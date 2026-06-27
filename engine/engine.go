@@ -237,6 +237,21 @@ func validateJob(j *Job) error {
 	return nil
 }
 
+// Jobs returns copies of all registered jobs in insertion order.
+func (e *Engine) Jobs() []*Job {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]*Job, 0, len(e.order))
+	for _, name := range e.order {
+		j := e.jobs[name]
+		cp := *j
+		cp.Steps = append([]Step(nil), j.Steps...)
+		cp.DependsOn = append([]string(nil), j.DependsOn...)
+		out = append(out, &cp)
+	}
+	return out
+}
+
 // Job returns a copy of the named job's definition.
 func (e *Engine) Job(name string) (*Job, bool) {
 	e.mu.Lock()

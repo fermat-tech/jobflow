@@ -13,6 +13,7 @@
 //	trigger <job>         run a job once now (ignores dependency gating)
 //	trigger --all         run every job ([--ordered] honors dependency order)
 //	run-all               same as "trigger --all"
+//	dag [--steps]         render the dependency DAG as SVG to stdout
 //	restart <job> [step]  re-run a job, optionally from a step name or 1-based index
 //	validate              load the config and report any errors
 //	handlers              list built-in Go step handlers
@@ -40,6 +41,7 @@ import (
 	"time"
 
 	"github.com/fermat-tech/jobflow/config"
+	"github.com/fermat-tech/jobflow/dagsvg"
 	"github.com/fermat-tech/jobflow/dsl"
 	"github.com/fermat-tech/jobflow/engine"
 )
@@ -160,12 +162,19 @@ func run(argv []string) error {
 	case "help":
 		usage()
 		return nil
-	case "serve", "list", "status", "trigger", "restart", "validate", "run-all":
+	case "serve", "list", "status", "trigger", "restart", "validate", "run-all", "dag":
 		eng, err := buildEngine(configPath, statePath, noWarn)
 		if err != nil {
 			return err
 		}
 		switch cmd {
+		case "dag":
+			svg, err := dagsvg.Render(eng.Jobs(), dagsvg.Options{Steps: hasFlag(args, "steps")})
+			if err != nil {
+				return err
+			}
+			_, err = os.Stdout.Write(svg)
+			return err
 		case "validate":
 			fmt.Printf("ok: %d job(s) loaded from %s\n", len(eng.Snapshot()), configPath)
 		case "list":
@@ -502,6 +511,7 @@ Commands:
   trigger --all [--ordered]  run every job (--ordered honors dependency order)
   run-all [--ordered]    same as 'trigger --all'
   restart <job> [step]   re-run a job from the top, or from a step name/1-based index
+  dag [--steps]          render the dependency DAG as SVG to stdout
   validate               load config and report any errors
   handlers               list built-in Go step handlers
   to-json [file]         transpile DSL (file or stdin) to JSON config on stdout
