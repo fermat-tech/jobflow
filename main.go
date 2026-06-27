@@ -135,9 +135,12 @@ func run(argv []string) error {
 	}
 
 	cmd, args := rest[0], rest[1:]
+	// Accept a leading dash on subcommands (e.g. "-to-json" == "to-json"), a
+	// common slip given the dashed global flags.
+	cmd = strings.TrimLeft(cmd, "-")
 
-	// "handlers" needs no config.
-	if cmd == "handlers" {
+	switch cmd {
+	case "handlers":
 		eng := engine.New(engine.Options{})
 		registerHandlers(eng)
 		fmt.Println("Built-in handlers:")
@@ -145,47 +148,49 @@ func run(argv []string) error {
 			fmt.Println("  " + n)
 		}
 		return nil
-	}
-
-	// DSL conversions read a file (or stdin) and write to stdout; no config.
-	if cmd == "to-json" || cmd == "to-dsl" {
+	case "to-json", "to-dsl":
+		// DSL conversions read a file (or stdin) and write to stdout; no config.
 		return doConvert(cmd, args, os.Stdout)
-	}
-
-	eng, err := buildEngine(configPath, statePath, noWarn)
-	if err != nil {
-		return err
-	}
-
-	switch cmd {
-	case "validate":
-		fmt.Printf("ok: %d job(s) loaded from %s\n", len(eng.Snapshot()), configPath)
+	case "version":
+		fmt.Printf("jobflow %s\n", resolveVersion())
 		return nil
-	case "list":
-		printList(eng)
+	case "help":
+		usage()
 		return nil
-	case "status":
-		var job string
-		if len(args) > 0 {
-			job = args[0]
+	case "serve", "list", "status", "trigger", "restart", "validate":
+		eng, err := buildEngine(configPath, statePath, noWarn)
+		if err != nil {
+			return err
 		}
-		return printStatus(eng, job)
-	case "trigger":
-		if len(args) < 1 {
-			return errors.New("trigger needs a job name")
+		switch cmd {
+		case "validate":
+			fmt.Printf("ok: %d job(s) loaded from %s\n", len(eng.Snapshot()), configPath)
+		case "list":
+			printList(eng)
+		case "status":
+			var job string
+			if len(args) > 0 {
+				job = args[0]
+			}
+			return printStatus(eng, job)
+		case "trigger":
+			if len(args) < 1 {
+				return errors.New("trigger needs a job name")
+			}
+			return doTrigger(eng, args[0])
+		case "restart":
+			if len(args) < 1 {
+				return errors.New("restart needs a job name")
+			}
+			from := ""
+			if len(args) > 1 {
+				from = args[1]
+			}
+			return doRestart(eng, args[0], from)
+		case "serve":
+			return doServe(eng)
 		}
-		return doTrigger(eng, args[0])
-	case "restart":
-		if len(args) < 1 {
-			return errors.New("restart needs a job name")
-		}
-		from := ""
-		if len(args) > 1 {
-			from = args[1]
-		}
-		return doRestart(eng, args[0], from)
-	case "serve":
-		return doServe(eng)
+		return nil
 	default:
 		return fmt.Errorf("unknown command %q (try 'jobflow help')", cmd)
 	}

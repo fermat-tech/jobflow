@@ -20,6 +20,33 @@ const dslSample = `job ci
       run make windows
 `
 
+func TestRunUnknownCommand(t *testing.T) {
+	// An unrecognized command must report itself, not fall through to load the
+	// default config file.
+	err := run([]string{"-bogus"})
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("err = %v, want an 'unknown command' error", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "jobflow.json") {
+		t.Fatalf("unknown command should not touch the default config: %v", err)
+	}
+}
+
+func TestRunDashedSubcommand(t *testing.T) {
+	// "-to-json" must be accepted as the to-json subcommand and read the file
+	// given to it, rather than falling through to open jobflow.json.
+	err := run([]string{"-to-json", "definitely-missing-file.jobflow"})
+	if err == nil {
+		t.Fatal("expected an error reading the missing file")
+	}
+	if strings.Contains(err.Error(), "jobflow.json") {
+		t.Fatalf("dashed subcommand fell through to the default config: %v", err)
+	}
+	if !strings.Contains(err.Error(), "definitely-missing-file.jobflow") {
+		t.Fatalf("error should reference the given file: %v", err)
+	}
+}
+
 // TestResolveVersion guards against regressing to a meaningless placeholder.
 func TestResolveVersion(t *testing.T) {
 	if v := resolveVersion(); v == "" || v == "dev" {
